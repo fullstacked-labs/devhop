@@ -41,17 +41,20 @@ export function parseTarget(input) {
 
   if (/^\d+$/.test(trimmed)) {
     const port = Number(trimmed);
-    return port > 0 && port <= 65535 ? { port, host: '127.0.0.1' } : null;
+    if (!(port > 0 && port <= 65535)) return null;
+    return { port, host: '127.0.0.1', protocol: port === 443 ? 'https:' : 'http:' };
   }
 
   try {
     const hasProtocol = trimmed.includes('://');
     const parsed = new URL(hasProtocol ? trimmed : `http://${trimmed}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     let port = parsed.port ? Number(parsed.port) : null;
     if (!port && hasProtocol) {
       port = parsed.protocol === 'https:' ? 443 : 80;
     }
-    return port && port > 0 && port <= 65535 ? { port, host: parsed.hostname || '127.0.0.1' } : null;
+    if (!(port > 0 && port <= 65535)) return null;
+    return { port, host: parsed.hostname || '127.0.0.1', protocol: hasProtocol ? parsed.protocol : (port === 443 ? 'https:' : 'http:') };
   } catch (_) {
     return null;
   }

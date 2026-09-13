@@ -1,10 +1,13 @@
+import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import qrcode from 'qrcode-terminal';
 import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
+import { copyToClipboard } from './clipboard.js';
 
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 
 const AIRPORT_CITIES = {
   ARN: 'Stockholm', LHR: 'London', FRA: 'Frankfurt', CDG: 'Paris', AMS: 'Amsterdam',
@@ -41,6 +44,40 @@ ${pc.bold('What it does:')}
 `);
 }
 
+export function setupShortcuts(args, { getUrl, quit }) {
+  if (!process.stdin.isTTY || process.env.CI || args.includes('--json')) return null;
+
+  const input = readline.createInterface({ input: process.stdin });
+  input.on('line', (line) => {
+    switch (line.trim()) {
+      case 'c':
+        if (getUrl()) copyToClipboard(getUrl());
+        break;
+      case 'o': {
+        const url = getUrl();
+        if (!url) break;
+        try {
+          const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open';
+          const commandArgs = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
+          const child = spawn(command, commandArgs, { stdio: 'ignore', detached: true });
+          child.on('error', (err) => console.error(`Could not open browser: ${err.message}`));
+          child.unref();
+        } catch (err) {
+          console.error(`Could not open browser: ${err.message}`);
+        }
+        break;
+      }
+      case 'q':
+        quit();
+        break;
+      case 'h':
+        console.log('\n  c + enter  copy tunnel URL\n  o + enter  open in browser\n  q + enter  quit\n  h + enter  show help\n');
+        break;
+    }
+  });
+  return input;
+}
+
 export async function run(args = []) {
   if (args.includes('--help') || args.includes('-h')) {
     printHelp();
@@ -57,11 +94,13 @@ export async function run(args = []) {
   const protocol = (args.includes('--http2') || (protocolIdx !== -1 && args[protocolIdx + 1] === 'http2')) ? 'http2' : undefined;
   let targetPort = null;
   let targetHost = '127.0.0.1';
+  let targetProtocol = 'http:';
   const targetArg = args.find((a) => !a.startsWith('-') && parseTarget(a));
   if (targetArg) {
     const parsed = parseTarget(targetArg);
     targetPort = parsed.port;
     targetHost = parsed.host;
+    targetProtocol = parsed.protocol;
   } else {
     // Port auto-detection
     if (!isJson) console.log(`\n${pc.cyan('●')} Scanning for active dev servers...`);
@@ -103,6 +142,7 @@ export async function run(args = []) {
   const { server, proxy } = createMasqueradeProxy({
     targetPort,
     targetHost,
+    targetProtocol,
     getPublicUrl: () => publicUrl
   });
 
@@ -114,17 +154,24 @@ export async function run(args = []) {
   }
   let cleanedUp = false;
   let tunnelHandle = null;
+  let shortcuts = null;
 
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    if (shortcuts) shortcuts.close();
     if (tunnelHandle) tunnelHandle.close();
     try { server.close(); } catch (_) {}
     try { proxy.close(); } catch (_) {}
     if (!isJson) console.log(`\n${pc.yellow('✔')} Tunnel disconnected. Cleaned up.\n`);
   };
+  const quit = () => { cleanup(); process.exit(0); };
+  const renderDashboard = () => {
+    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation);
+    if (shortcuts) console.log(pc.dim('  press h + enter to show help'));
+  };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
-    process.on(sig, () => { cleanup(); process.exit(0); });
+    process.on(sig, quit);
   }
   process.on('uncaughtException', (err) => {
     cleanup();
@@ -138,18 +185,23 @@ export async function run(args = []) {
     protocol,
     onUrl: (url) => {
       publicUrl = url;
+      shortcuts = setupShortcuts(args, { getUrl: () => publicUrl, quit });
       if (isJson) {
-        console.log(JSON.stringify({ url, target: `http://${targetHost}:${targetPort}`, port: targetPort, host: targetHost }));
+        console.log(JSON.stringify({ url, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol }));
       } else {
-        displayDashboard(url, targetPort, targetHost, showQr, edgeLocation);
+        renderDashboard();
       }
+      if (shortcuts && args.includes('--copy')) copyToClipboard(url);
     },
     onLocation: (loc) => {
       const formatted = AIRPORT_CITIES[loc] ? `${loc} (${AIRPORT_CITIES[loc]})` : loc;
       if (formatted !== edgeLocation) {
         edgeLocation = formatted;
-        if (publicUrl && !isJson) displayDashboard(publicUrl, targetPort, targetHost, showQr, edgeLocation);
+        if (publicUrl && !isJson) renderDashboard();
       }
+    },
+    onRetry: () => {
+      if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
     },
     onError: (err) => {
       console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
@@ -173,12 +225,13 @@ export async function run(args = []) {
   });
 }
 
-function displayDashboard(url, targetPort, targetHost, showQr, edgeLocation) {
+function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation) {
+  const scheme = targetProtocol === 'https:' ? 'https' : 'http';
   console.clear();
   console.log('');
   console.log(pc.bold(pc.bgCyan(pc.black(' 🦘 DEVHOP '))));
   console.log('');
-  console.log(`  ${pc.bold('Target:')}       ${pc.green(`http://${targetHost}:${targetPort}`)}`);
+  console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${targetHost}:${targetPort}`)}`);
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);
   console.log('');
   if (edgeLocation) {

@@ -12,8 +12,11 @@
 - Solves Vite 6 `server.allowedHosts` "host not allowed" 403 Forbidden errors.
 - Grants Mobile Safari & Android Chrome full permissions for microphone (`getUserMedia`), camera, WebCrypto, and Passkeys via trusted HTTPS.
 - Relabels Host, Origin, and Referer headers in-process to `localhost:<port>` so dev servers treat the phone as local loopback traffic.
-- Tolerant input parsing: accepts raw ports (`3000`), `host:port`, URLs (`http://localhost:5173`), and container addresses (`0.0.0.0`).
+- Tolerant input parsing: accepts bare ports (`3000`), `host:port`, and HTTP(S) URLs such as `http://localhost:5173` or `https://localhost:8443`; a bare `443` implies HTTPS.
+- Upstream HTTPS accepts self-signed certificates on loopback. A wrong scheme returns `502` with a hint to retry using the matching URL scheme; example: `npx devhop https://localhost:8443`.
 - Generates compact Unicode terminal QR code for instant phone camera scanning.
+- Interactive shortcuts and clipboard: In an interactive TTY (not CI, piped stdin, or `--json`), `c` copies, `o` opens, `q` quits, and `h` shows help; `--copy` copies when the tunnel URL is ready. Copying uses OSC 52 with tmux wrapping, then a native fallback, and never touches the clipboard otherwise.
+- Mobile inspector: `https://<tunnel>/__devhop/inspect` provides an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes without modifying the app HTML.
 - Agent-ready: provides `--json` flag for automated AI coding agent workflows.
 - Corporate firewall bypass: `npx devhop [target] --http2` routes the tunnel over HTTP/2 (TCP 443) when UDP/QUIC is blocked.
 - Zero signup, zero accounts, zero cloud config, zero system daemons.

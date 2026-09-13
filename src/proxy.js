@@ -1,5 +1,58 @@
 import http from 'node:http';
 import httpProxy from 'http-proxy';
+const INSPECT_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>devhop inspector</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111827; color: #e5e7eb; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { overflow: hidden; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem); height: 100%; }
+    .preview { min-width: 0; background: #fff; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+    .panel { overflow: auto; padding: 2rem; border-left: 1px solid #374151; }
+    .eyebrow { margin: 0 0 .5rem; color: #93c5fd; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0 0 .75rem; font-size: 1.6rem; line-height: 1.1; }
+    h2 { margin: 2rem 0 .75rem; font-size: 1rem; }
+    p { color: #cbd5e1; line-height: 1.5; }
+    .bookmarklet { display: block; margin: 1.25rem 0 .75rem; padding: .75rem 1rem; border-radius: .5rem; background: #60a5fa; color: #0f172a; font-weight: 700; text-align: center; text-decoration: none; }
+    .bookmarklet:hover { background: #93c5fd; }
+    .hint { margin: 0; font-size: .85rem; }
+    ul { display: grid; gap: .7rem; margin: 0; padding: 0; list-style: none; }
+    a { color: #93c5fd; }
+    @media (max-width: 720px) {
+      body { overflow: auto; }
+      main { display: flex; flex-direction: column; height: auto; min-height: 100%; }
+      .preview { height: 68vh; min-height: 22rem; }
+      .panel { border-top: 1px solid #374151; border-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="preview" aria-label="Application preview">
+      <iframe src="/" title="Your dev server"></iframe>
+    </section>
+    <aside class="panel">
+      <p class="eyebrow">devhop inspector</p>
+      <h1>Inspect your app on-device</h1>
+      <p>Use the preview to open your app, then load Eruda without changing the app HTML or proxying its response body.</p>
+      <a class="bookmarklet" href="javascript:(()=>{const d=document.querySelector('iframe')?.contentDocument||document,w=d.defaultView;if(w.eruda){w.eruda.init();return}const s=d.createElement('script');s.src='https://cdn.jsdelivr.net/npm/eruda@3.4.3';s.onload=()=>w.eruda.init();d.head.appendChild(s)})()">Load Eruda on the app page</a>
+      <p class="hint">Tap this link while the app is open. Save it as a bookmarklet if you want to use it after opening the app directly.</p>
+      <h2>Bundler recipes</h2>
+      <ul>
+        <li><a href="https://www.npmjs.com/package/vite-plugin-eruda" target="_blank" rel="noreferrer">Vite: vite-plugin-eruda</a></li>
+        <li><a href="https://nextjs.org/docs/app/building-your-application/rendering/client-components" target="_blank" rel="noreferrer">Next.js: dev-only client provider</a></li>
+      </ul>
+    </aside>
+  </main>
+</body>
+</html>`;
+
 
 /**
  * Creates a reverse proxy that masquerades Host, Origin, and Referer headers
@@ -15,13 +68,17 @@ import httpProxy from 'http-proxy';
 export function createMasqueradeProxy({
   targetPort,
   targetHost = '127.0.0.1',
+  targetProtocol = 'http:',
   getPublicUrl = () => null
 }) {
   const normalizedHost = targetHost === '0.0.0.0' ? '127.0.0.1' : targetHost;
   const proxy = httpProxy.createProxyServer({
-    target: `http://${normalizedHost}:${targetPort}`,
+    target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${normalizedHost}:${targetPort}`,
     ws: true,
     changeOrigin: true,
+    // Accept self-signed local certs (vite --https, next --experimental-https);
+    // loopback traffic never leaves the kernel, so no MITM exposure.
+    secure: targetProtocol !== 'https:',
     xfwd: false // Managed explicitly below to avoid leaking public tunnel host
   });
 
@@ -113,7 +170,7 @@ export function createMasqueradeProxy({
             'Content-Type': 'text/plain',
             'Retry-After': '1'
           });
-          res.end(`devhop: Target server not responding on port ${targetPort}`);
+          res.end(err?.code === 'ECONNRESET' && targetProtocol === 'https:' ? `devhop: TLS handshake failed on port ${targetPort} — is the dev server really HTTPS? Try: npx devhop http://${normalizedHost}:${targetPort}` : `devhop: Target server not responding on port ${targetPort}`);
         } catch (_) {}
       }
     } else if (res && typeof res.destroy === 'function' && !res.destroyed) {
@@ -123,12 +180,17 @@ export function createMasqueradeProxy({
     }
   });
 
-  const server = http.createServer((req, res) => {
-    proxy.web(req, res);
-  });
 
-  server.on('upgrade', (req, socket, head) => {
-    proxy.ws(req, socket, head);
+  const server = http.createServer((req, res) => {
+    if (req.url?.split('?', 1)[0] === '/__devhop/inspect') {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store'
+      });
+      res.end(INSPECT_PAGE);
+      return;
+    }
+    proxy.web(req, res);
   });
 
   server.on('connection', (socket) => {

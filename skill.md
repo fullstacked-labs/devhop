@@ -27,8 +27,15 @@ npx devhop http://localhost:5173
 npx devhop localhost:3000
 npx devhop 0.0.0.0:4321
 
-# Output clean JSON for automation
+
+# Upstream HTTPS (self-signed loopback certificates are accepted)
+npx devhop https://localhost:8443
+# Targets accept bare ports, host:port, and http(s):// URLs; bare 443 implies HTTPS.
+# Loopback self-signed certificates are accepted; a wrong scheme returns 502 with a retry hint.
+# Output clean JSON for automation (`url`, `target`, `port`, `host`, `protocol`)
 npx devhop 3000 --json
+# Copy the tunnel URL automatically once it is ready (interactive terminals)
+npx devhop 3000 --copy
 
 # Run without printing terminal QR code (useful for headless / CI logs)
 npx devhop --no-qr
@@ -37,12 +44,26 @@ npx devhop --no-qr
 npx devhop 3000 --http2
 ```
 
+### Interactive shortcuts
+
+In an interactive terminal (not CI, piped stdin, or `--json`):
+
+| Input | Action |
+| --- | --- |
+| `c` + Enter | Copy the tunnel URL |
+| `o` + Enter | Open the tunnel URL in a browser |
+| `q` + Enter | Quit and disconnect |
+| `h` + Enter | Show shortcut help |
+
+`--copy` opts into copying when the tunnel URL is ready; otherwise the clipboard is untouched until `c`.
+
 ## How It Works
 1. **Instant trusted HTTPS**: Creates a temporary, trusted HTTPS link via Cloudflare's edge with zero account setup.
 2. **Framework friendly**: Relabels incoming requests in-process so Next.js and Vite treat the phone as a local browser tab running on loopback, completely avoiding cross-origin blocks.
 3. **Live updates on save**: Preserves the live WebSocket connection so your phone updates automatically as you edit code.
 4. **Real HTTPS padlock**: Mobile Safari and Chrome grant full access to microphone, camera, and WebCrypto without certificate warnings.
 5. **Survives server restarts**: Recovers from `ECONNREFUSED` during Vite or Next.js rebuilds without dropping the tunnel.
+6. **Mobile inspector**: Open `https://<tunnel>/__devhop/inspect` for an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes; the app HTML stays untouched.
 
 ## Instructions for AI Agents
 - When the user asks to preview their app on a phone or test microphone/camera: invoke `npx devhop` (or pass the port/URL if known).

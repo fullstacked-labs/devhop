@@ -50,57 +50,87 @@ export async function ensureBinary(onProgress) {
   }
 }
 
-export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, onError, onClose }) {
+// Quick-tunnel creation fails intermittently ("failed to request quick tunnel"
+// is a recurring cloudflared complaint). One retry with backoff fixes the
+// majority of first-run failures; more retries just make the user wait.
+const MAX_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 2000;
+
+export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, onError, onClose, onRetry }) {
   const tunnelArgs = ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${localPort}`];
   if (protocol === 'http2') {
     tunnelArgs.push('--protocol', 'http2');
   }
-  const child = spawn(binPath, tunnelArgs, {
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
 
-  let urlFound = false;
+  let attempt = 0;
+  let current = null;
+  let manualClose = false;
   let lastLocation = null;
-  const recentOutput = [];
-  const handleOutput = (data) => {
-    const text = data.toString();
-    for (const raw of text.split('\n')) {
-      const line = raw.trim();
-      if (line) {
-        recentOutput.push(line);
-        if (recentOutput.length > 10) recentOutput.shift();
-      }
-    }
-    const locMatch = text.match(/location=([A-Z0-9]+)/i);
-    if (locMatch && onLocation) {
-      const loc = locMatch[1].toUpperCase();
-      if (loc !== lastLocation) {
-        lastLocation = loc;
-        onLocation(loc);
-      }
-    }
-    const urlMatch = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (urlMatch && !urlFound) {
-      urlFound = true;
-      if (onUrl) onUrl(urlMatch[0]);
-    }
-  };
 
-  child.stdout.on('data', handleOutput);
-  child.stderr.on('data', handleOutput);
+  function launch() {
+    attempt += 1;
+    const child = spawn(binPath, tunnelArgs, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
 
-  if (onError) child.on('error', (err) => onError(err, { recentOutput: recentOutput.join('\n'), urlFound }));
-  if (onClose) child.on('close', (code, signal) => onClose(code, { recentOutput: recentOutput.join('\n'), urlFound, signal }));
+    let urlFound = false;
+    const recentOutput = [];
+    const handleOutput = (data) => {
+      const text = data.toString();
+      for (const raw of text.split('\n')) {
+        const line = raw.trim();
+        if (line) {
+          recentOutput.push(line);
+          if (recentOutput.length > 10) recentOutput.shift();
+        }
+      }
+      const locMatch = text.match(/location=([A-Z0-9]+)/i);
+      if (locMatch && onLocation) {
+        const loc = locMatch[1].toUpperCase();
+        if (loc !== lastLocation) {
+          lastLocation = loc;
+          onLocation(loc);
+        }
+      }
+      const urlMatch = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (urlMatch && !urlFound) {
+        urlFound = true;
+        if (onUrl) onUrl(urlMatch[0]);
+      }
+    };
+
+    child.stdout.on('data', handleOutput);
+    child.stderr.on('data', handleOutput);
+
+    child.on('error', (err) => {
+      if (onError) onError(err, { recentOutput: recentOutput.join('\n'), urlFound });
+    });
+
+    child.on('close', (code, signal) => {
+      if (manualClose) return;
+      if (!urlFound && attempt < MAX_ATTEMPTS) {
+        if (onRetry) onRetry(attempt);
+        setTimeout(() => { if (!manualClose) launch(); }, RETRY_DELAY_MS);
+        return;
+      }
+      if (onClose) onClose(code, { recentOutput: recentOutput.join('\n'), urlFound, signal });
+    });
+
+    current = child;
+  }
+
+  launch();
 
   return {
-    child,
+    child: current,
     close: () => {
+      manualClose = true;
       try {
-        child.kill('SIGTERM');
+        current.kill('SIGTERM');
         // SIGKILL fallback after 500ms to guarantee zero zombie processes
         setTimeout(() => {
           try {
-            if (!child.killed) child.kill('SIGKILL');
+            if (!current.killed) current.kill('SIGKILL');
           } catch (_) {}
         }, 500);
       } catch (_) {}

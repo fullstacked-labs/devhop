@@ -1,8 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import https from 'node:https';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createMasqueradeProxy } from '../src/proxy.js';
+import { startTunnel } from '../src/tunnel.js';
 import { isPortOpen, detectDevPorts, findFreePort, parseTarget } from '../src/port.js';
+
+test('Inspector page is served by devhop while app responses stay byte-identical', async (t) => {
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const payload = Buffer.from([0, 1, 2, 3, 250, 251, 252, 253, 254, 255]);
+
+  const backend = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+    res.end(payload);
+  });
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.close();
+    proxyServer.close();
+  });
+
+  const inspectResponse = await fetch(`http://127.0.0.1:${proxyPort}/__devhop/inspect`);
+  assert.strictEqual(inspectResponse.status, 200);
+  assert.match(inspectResponse.headers.get('content-type'), /^text\/html/);
+  const inspectHtml = await inspectResponse.text();
+  assert.match(inspectHtml, /Eruda/);
+  assert.match(inspectHtml, /<iframe[^>]+src="\/"/);
+
+  const appResponse = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(appResponse.status, 200);
+  assert.deepStrictEqual(Buffer.from(await appResponse.arrayBuffer()), payload);
+});
 
 test('Proxy rewrites request headers (Host, Origin, Referer, x-forwarded-proto, sec-fetch-site)', async (t) => {
   const backendPort = await findFreePort();
@@ -195,20 +231,23 @@ test('Port probing and auto-detection identifies open dev server ports', async (
 });
 
 test('parseTarget dynamically handles ports, hosts, URLs, and edge cases', () => {
-  assert.deepStrictEqual(parseTarget('3000'), { port: 3000, host: '127.0.0.1' });
-  assert.deepStrictEqual(parseTarget('localhost:3000'), { port: 3000, host: 'localhost' });
-  assert.deepStrictEqual(parseTarget('127.0.0.1:8080'), { port: 8080, host: '127.0.0.1' });
-  assert.deepStrictEqual(parseTarget('0.0.0.0:4321'), { port: 4321, host: '0.0.0.0' });
-  assert.deepStrictEqual(parseTarget('http://localhost:5173'), { port: 5173, host: 'localhost' });
-  assert.deepStrictEqual(parseTarget('https://127.0.0.1:8443'), { port: 8443, host: '127.0.0.1' });
-  assert.deepStrictEqual(parseTarget('http://127.0.0.1:3000/some/path'), { port: 3000, host: '127.0.0.1' });
-  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '[::1]' });
-  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '[::1]' });
+  assert.deepStrictEqual(parseTarget('3000'), { port: 3000, host: '127.0.0.1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('443'), { port: 443, host: '127.0.0.1', protocol: 'https:' });
+  assert.deepStrictEqual(parseTarget('localhost:3000'), { port: 3000, host: 'localhost', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('127.0.0.1:8080'), { port: 8080, host: '127.0.0.1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('0.0.0.0:4321'), { port: 4321, host: '0.0.0.0', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('http://localhost:5173'), { port: 5173, host: 'localhost', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('https://127.0.0.1:8443'), { port: 8443, host: '127.0.0.1', protocol: 'https:' });
+  assert.deepStrictEqual(parseTarget('https://localhost'), { port: 443, host: 'localhost', protocol: 'https:' });
+  assert.deepStrictEqual(parseTarget('http://127.0.0.1:3000/some/path'), { port: 3000, host: '127.0.0.1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
 
   assert.strictEqual(parseTarget(''), null);
   assert.strictEqual(parseTarget('--no-qr'), null);
   assert.strictEqual(parseTarget('-h'), null);
   assert.strictEqual(parseTarget('invalid-target'), null);
+  assert.strictEqual(parseTarget('ftp://localhost:21'), null);
   assert.strictEqual(parseTarget('70000'), null);
   assert.strictEqual(parseTarget('0'), null);
 });
@@ -470,4 +509,74 @@ test('Tunnel passes --protocol http2 to cloudflared when requested', async (t) =
     startTunnel({ localPort: 3000, binPath: stub, onClose: (_c, d) => resolve(d) });
   });
   assert.doesNotMatch(without.recentOutput, /--protocol/, 'Default tunnel must not pass --protocol');
+});
+
+test('Proxy reaches self-signed HTTPS upstream when protocol is https:', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-https-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'),
+    '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+
+  const backend = https.createServer({
+    key: fs.readFileSync(path.join(dir, 'key.pem')),
+    cert: fs.readFileSync(path.join(dir, 'cert.pem'))
+  }, (req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('secure-backend'); });
+  await new Promise((r) => backend.listen(backendPort, '127.0.0.1', r));
+  t.after(() => new Promise((r) => backend.close(r)));
+
+  const { server: proxyServer } = createMasqueradeProxy({
+    targetPort: backendPort,
+    targetProtocol: 'https:',
+    getPublicUrl: () => 'https://mock.trycloudflare.com'
+  });
+  await new Promise((r) => proxyServer.listen(proxyPort, '127.0.0.1', r));
+  t.after(() => new Promise((r) => proxyServer.close(r)));
+
+  const body = await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${proxyPort}/`, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, data }));
+    }).on('error', reject);
+  });
+  assert.equal(body.status, 200);
+  assert.equal(body.data, 'secure-backend');
+});
+
+test('Tunnel retries once with backoff when cloudflared exits before a URL is found', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-retry-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, 'cloudflared-stub');
+  // First run exits empty (quick-tunnel failure); second run prints a URL then exits.
+  fs.writeFileSync(stub, `#!/bin/sh
+if [ -f ${dir}/second ]; then
+  echo "https://retry-test.trycloudflare.com"
+else
+  touch ${dir}/second
+  echo "failed to request quick tunnel" >&2
+  exit 1
+fi
+`);
+  fs.chmodSync(stub, '755');
+
+  const events = [];
+  const handle = startTunnel({
+    localPort: 3000,
+    binPath: stub,
+    onRetry: () => events.push('retry'),
+    onUrl: (url) => events.push(`url:${url}`),
+    onClose: (code, details) => events.push(`close:${code}:${details.urlFound}`)
+  });
+  t.after(() => handle.close());
+  const result = await new Promise((resolve) => {
+    const poll = setInterval(() => {
+      if (events.some((e) => e.startsWith('close:'))) { clearInterval(poll); resolve(events); }
+    }, 100);
+  });
+  assert.ok(events.some((e) => e === 'retry'), 'must fire onRetry after first failure');
+  assert.ok(events.some((e) => e.startsWith('url:https://retry-test.trycloudflare.com')), 'second attempt must surface a URL');
+  assert.ok(events.some((e) => e.startsWith('close:0:true')), 'must close cleanly after successful retry');
 });
