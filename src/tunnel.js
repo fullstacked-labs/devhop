@@ -50,9 +50,7 @@ export async function ensureBinary(onProgress) {
   }
 }
 
-// Quick-tunnel creation fails intermittently ("failed to request quick tunnel"
-// is a recurring cloudflared complaint). One retry with backoff fixes the
-// majority of first-run failures; more retries just make the user wait.
+// Quick-tunnel creation fails intermittently; one retry fixes most first-run failures.
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2000;
 

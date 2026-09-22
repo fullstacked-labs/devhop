@@ -77,7 +77,7 @@ const HOP_BY_HOP = new Set([
  * @param {string} [options.targetHost='127.0.0.1'] - Local dev server host
  * @param {string} [options.targetProtocol='http:'] - Upstream scheme ('http:' or 'https:')
  * @param {() => string | null} [options.getPublicUrl] - Function returning current public tunnel URL
- * @returns {{ server: http.Server, close: () => void }}
+ * @returns {{ server: http.Server }}
  */
 export function createMasqueradeProxy({
   targetPort,
@@ -206,40 +206,23 @@ export function createMasqueradeProxy({
     // WebSocket handshakes are request/response, not chunked: force a definite
     // framing so the dev server parses the request as a single block.
     headers.connection = 'Upgrade';
-    headers['proxy-connection'] = undefined;
 
-    const raw = Object.entries(headers)
-      .filter(([, v]) => v !== undefined)
-      .flatMap(([k, v]) => (Array.isArray(v) ? v.map((val) => `${k}: ${val}`) : [`${k}: ${v}`]));
-    const handshake = `${req.method} ${req.url} HTTP/1.1\r\n${raw.join('\r\n')}\r\n\r\n`;
+    const handshake = `${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\r\n')}\r\n\r\n`;
 
-    const connect = (cb) => {
-      if (upstreamIsHttps) {
-        const socket = tls.connect(
-          { host: normalizedHost, port: targetPort, rejectUnauthorized: false, servername: normalizedHost },
-          cb
-        );
-        return socket;
-      }
-      const socket = net.connect({ host: normalizedHost, port: targetPort }, cb);
-      return socket;
-    };
+    const connect = (cb) =>
+      upstreamIsHttps
+        ? tls.connect({ host: normalizedHost, port: targetPort, rejectUnauthorized: false, servername: normalizedHost }, cb)
+        : net.connect({ host: normalizedHost, port: targetPort }, cb);
 
-    let upstreamSocket;
-    try {
-      upstreamSocket = connect(() => {
-        upstreamSocket.write(handshake);
-        if (head?.length) upstreamSocket.write(head);
-      });
-    } catch (_) {
-      clientSocket.destroy();
-      return;
-    }
-
+    const upstreamSocket = connect(() => {
+      upstreamSocket.write(handshake);
+      if (head?.length) upstreamSocket.write(head);
+    });
     upstreamSocket.setNoDelay(true);
     upstreamSocket.on('error', () => clientSocket.destroy());
     clientSocket.on('error', () => upstreamSocket.destroy());
-    clientSocket.setNoDelay(true);
 
     // Wait for the 101 (or any failure status) before wiring raw pipes.
     let buffered = Buffer.alloc(0);
@@ -294,10 +277,5 @@ export function createMasqueradeProxy({
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   });
 
-  return {
-    server,
-    close: () => {
-      try { server.close(); } catch (_) {}
-    }
-  };
+  return { server };
 }

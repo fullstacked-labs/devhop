@@ -101,11 +101,8 @@ export async function run(args = []) {
   // whatever unrelated server happens to be running.
   const invalidArg = args.find((a) => !a.startsWith('-') && !parseTarget(a));
   if (invalidArg && !targetArg) {
-    console.error(pc.red(`\nInvalid target: "${invalidArg}"`));
-    console.error(`Expected a port, host:port, or http(s):// URL. Examples:`);
-    console.error(`  ${pc.cyan('npx devhop 3000')}`);
-    console.error(`  ${pc.cyan('npx devhop localhost:5173')}`);
-    console.error(`  ${pc.cyan('npx devhop https://localhost:8443')}\n`);
+    console.error(pc.red(`\nInvalid target: "${invalidArg}" — expected a port, host:port, or http(s) URL.`));
+    console.error(`Examples: ${pc.cyan('npx devhop 3000')}, ${pc.cyan('npx devhop localhost:5173')}, ${pc.cyan('npx devhop https://localhost:8443')}\n`);
     process.exit(1);
   }
   if (targetArg) {
