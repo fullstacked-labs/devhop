@@ -1,5 +1,8 @@
 import http from 'node:http';
-import httpProxy from 'http-proxy';
+import https from 'node:https';
+import tls from 'node:tls';
+import net from 'node:net';
+
 const INSPECT_PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -53,17 +56,28 @@ const INSPECT_PAGE = `<!doctype html>
 </body>
 </html>`;
 
+const LOCAL_HOST_PATTERN = /^https?:\/\/\.?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(?=\/|$)/i;
+const DOMAIN_COOKIE_PATTERN = /;\s*domain=(\.?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]))/gi;
+const HOP_BY_HOP = new Set([
+  'connection', 'keep-alive', 'transfer-encoding', 'proxy-authenticate',
+  'proxy-authorization', 'te', 'trailer', 'upgrade'
+]);
 
 /**
  * Creates a reverse proxy that masquerades Host, Origin, and Referer headers
- * to localhost:<targetPort> and rewrites response Location, Access-Control-Allow-Origin,
- * and Set-Cookie headers.
+ * so remote phones look like local loopback traffic to the dev server.
+ *
+ * Pure Node stdlib (http/https request for regular traffic, raw TCP/TLS socket
+ * for WebSocket upgrades) — no proxy dependency. Rewrites on the way in: Host,
+ * x-forwarded-*, Origin, Referer, sec-fetch-site. On the way out: Location,
+ * x-action-redirect, Access-Control-Allow-Origin, Set-Cookie Domain.
  *
  * @param {Object} options
  * @param {number} options.targetPort - Local dev server port to proxy to
  * @param {string} [options.targetHost='127.0.0.1'] - Local dev server host
+ * @param {string} [options.targetProtocol='http:'] - Upstream scheme ('http:' or 'https:')
  * @param {() => string | null} [options.getPublicUrl] - Function returning current public tunnel URL
- * @returns {{ server: http.Server, proxy: httpProxy }}
+ * @returns {{ server: http.Server, close: () => void }}
  */
 export function createMasqueradeProxy({
   targetPort,
@@ -72,114 +86,187 @@ export function createMasqueradeProxy({
   getPublicUrl = () => null
 }) {
   const normalizedHost = targetHost === '0.0.0.0' ? '127.0.0.1' : targetHost;
-  const proxy = httpProxy.createProxyServer({
-    target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${normalizedHost}:${targetPort}`,
-    ws: true,
-    changeOrigin: true,
-    // Accept self-signed local certs (vite --https, next --experimental-https);
-    // loopback traffic never leaves the kernel, so no MITM exposure.
-    secure: targetProtocol !== 'https:',
-    xfwd: false // Managed explicitly below to avoid leaking public tunnel host
-  });
+  const upstreamIsHttps = targetProtocol === 'https:';
 
-  const rewriteRequestHeaders = (proxyReq, req) => {
-    // 1. Masquerade Host and x-forwarded headers to localhost so dev servers treat connection as local
-    proxyReq.setHeader('Host', `localhost:${targetPort}`);
-    proxyReq.setHeader('x-forwarded-host', `localhost:${targetPort}`);
-    proxyReq.setHeader('x-forwarded-proto', 'https');
-    proxyReq.setHeader('x-forwarded-ssl', 'on');
+  function masqueradeRequestHeaders(req) {
+    const headers = { ...req.headers };
+    // 1. Masquerade Host and x-forwarded headers so dev servers treat the
+    //    connection as local loopback traffic.
+    headers.host = `localhost:${targetPort}`;
+    headers['x-forwarded-host'] = `localhost:${targetPort}`;
+    headers['x-forwarded-proto'] = 'https';
+    headers['x-forwarded-ssl'] = 'on';
 
-    // 2. Align Origin with https protocol (prevents Next.js cross-origin API rejections)
-    if (req.headers.origin) {
-      proxyReq.setHeader('Origin', `https://localhost:${targetPort}`);
-    } else {
-      proxyReq.removeHeader('Origin');
+    // 2. Align Origin with https protocol (prevents Next.js cross-origin rejections)
+    if (headers.origin) {
+      headers.origin = `https://localhost:${targetPort}`;
     }
 
     // 3. Align Referer with https protocol
-    if (req.headers.referer) {
-      proxyReq.setHeader('Referer', `https://localhost:${targetPort}/`);
+    if (headers.referer) {
+      headers.referer = `https://localhost:${targetPort}/`;
     }
 
     // 4. Normalize sec-fetch-site to same-origin
-    if (req.headers['sec-fetch-site']) {
-      proxyReq.setHeader('sec-fetch-site', 'same-origin');
+    if (headers['sec-fetch-site']) {
+      headers['sec-fetch-site'] = 'same-origin';
     }
 
-    // 5. Harden against request smuggling on chunked transfers (GHSA-ggv3-7p47-pfv8)
-    if (req.headers['transfer-encoding']?.includes('chunked')) {
-      proxyReq.setHeader('Connection', 'close');
+    // 5. Harden against request smuggling on chunked transfers (GHSA-ggv3-7p47-pfv8):
+    //    an explicit chunked body must not also carry content-length.
+    if (headers['transfer-encoding']?.includes('chunked')) {
+      headers.connection = 'close';
+      delete headers['content-length'];
     }
-  };
+    return headers;
+  }
 
-  proxy.on('proxyReq', rewriteRequestHeaders);
-  proxy.on('proxyReqWs', rewriteRequestHeaders);
-
-  // Intercept response headers to rewrite Location, CORS, and Set-Cookie
-  proxy.on('proxyRes', (proxyRes) => {
+  function rewriteResponseHeaders(upstreamHeaders) {
     const publicUrl = getPublicUrl();
+    const headers = { ...upstreamHeaders };
 
-    // 1. Rewrite Location header in redirects (OAuth, Server Actions, form submissions)
-    // Matches both http:// and https:// across localhost, 127.0.0.1, 0.0.0.0, and [::1]
-    if (proxyRes.headers.location && publicUrl) {
-      proxyRes.headers.location = proxyRes.headers.location.replace(
-        new RegExp(`^https?://(\\.?(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]))(:${targetPort})?(?=/|$)`, 'i'),
-        publicUrl
-      );
+    // 1. Rewrite Location header in redirects (OAuth, Server Actions, form posts)
+    if (headers.location && publicUrl) {
+      headers.location = headers.location.replace(LOCAL_HOST_PATTERN, publicUrl);
     }
 
-    // 1b. Rewrite Next.js Server Action redirect header (x-action-redirect)
-    if (proxyRes.headers['x-action-redirect'] && publicUrl) {
-      proxyRes.headers['x-action-redirect'] = proxyRes.headers['x-action-redirect'].replace(
-        new RegExp(`^https?://(\\.?(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]))(:${targetPort})?(?=/|$)`, 'i'),
-        publicUrl
-      );
+    // 1b. Rewrite Next.js Server Action redirect header
+    if (headers['x-action-redirect'] && publicUrl) {
+      headers['x-action-redirect'] = headers['x-action-redirect'].replace(LOCAL_HOST_PATTERN, publicUrl);
     }
 
     // 2. Rewrite Access-Control-Allow-Origin if backend reflects localhost origin
-    const acao = proxyRes.headers['access-control-allow-origin'];
-    if (acao && publicUrl) {
-      if (acao.includes('localhost') || acao.includes('127.0.0.1') || acao.includes('0.0.0.0') || acao.includes('[::1]')) {
-        proxyRes.headers['access-control-allow-origin'] = publicUrl;
-      }
+    const acao = headers['access-control-allow-origin'];
+    if (acao && publicUrl && /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/i.test(acao)) {
+      headers['access-control-allow-origin'] = publicUrl;
     }
 
-    // 3. Rewrite Set-Cookie to strip Domain=localhost (including leading dots) so mobile browsers store cookies
-    if (proxyRes.headers['set-cookie']) {
-      const cookies = Array.isArray(proxyRes.headers['set-cookie'])
-        ? proxyRes.headers['set-cookie']
-        : [proxyRes.headers['set-cookie']];
-
-      proxyRes.headers['set-cookie'] = cookies.map((cookie) => {
-        return cookie.replace(/;\s*domain=(\.?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]))/gi, '');
-      });
+    // 3. Strip Domain=localhost from Set-Cookie so mobile browsers store cookies
+    if (headers['set-cookie']) {
+      const cookies = Array.isArray(headers['set-cookie'])
+        ? headers['set-cookie']
+        : [headers['set-cookie']];
+      headers['set-cookie'] = cookies.map((cookie) => cookie.replace(DOMAIN_COOKIE_PATTERN, ''));
     }
 
     // 4. Ensure streaming / SSE responses are not buffered by edge tunnels
-    if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
-      proxyRes.headers['x-accel-buffering'] = 'no';
+    if (headers['content-type']?.includes('text/event-stream')) {
+      headers['x-accel-buffering'] = 'no';
     }
-  });
 
-  // Handle proxy errors: return clean 502 on dev server restarts / crashes
-  proxy.on('error', (err, req, res) => {
-    if (res && typeof res.writeHead === 'function') {
-      if (!res.headersSent && res.writable) {
-        try {
-          res.writeHead(502, {
-            'Content-Type': 'text/plain',
-            'Retry-After': '1'
-          });
-          res.end(err?.code === 'ECONNRESET' && targetProtocol === 'https:' ? `devhop: TLS handshake failed on port ${targetPort} — is the dev server really HTTPS? Try: npx devhop http://${normalizedHost}:${targetPort}` : `devhop: Target server not responding on port ${targetPort}`);
-        } catch (_) {}
+    // 5. Strip hop-by-hop headers; Node re-derives framing from the body stream.
+    for (const name of HOP_BY_HOP) delete headers[name];
+    return headers;
+  }
+
+  function send502(res, err) {
+    if (!res || res.headersSent || !res.writable) return;
+    try {
+      res.writeHead(502, {
+        'Content-Type': 'text/plain',
+        'Retry-After': '1'
+      });
+      res.end(
+        err?.code === 'ECONNRESET' && upstreamIsHttps
+          ? `devhop: TLS handshake failed on port ${targetPort} — is the dev server really HTTPS? Try: npx devhop http://${normalizedHost}:${targetPort}`
+          : `devhop: Target server not responding on port ${targetPort}`
+      );
+    } catch (_) {}
+  }
+
+  function proxyWebRequest(req, res) {
+    const request = upstreamIsHttps ? https.request : http.request;
+    const upstreamReq = request(
+      {
+        host: normalizedHost,
+        port: targetPort,
+        method: req.method,
+        path: req.url,
+        headers: masqueradeRequestHeaders(req),
+        // Self-signed local certs are fine: loopback traffic never leaves the
+        // kernel, so there is no MITM exposure.
+        ...(upstreamIsHttps ? { rejectUnauthorized: false } : {})
+      },
+      (upstreamRes) => {
+        const headers = rewriteResponseHeaders(upstreamRes.headers);
+        res.writeHead(upstreamRes.statusCode, headers);
+        upstreamRes.pipe(res);
+        upstreamRes.on('error', () => res.destroy());
       }
-    } else if (res && typeof res.destroy === 'function' && !res.destroyed) {
-      try {
-        res.destroy();
-      } catch (_) {}
-    }
-  });
+    );
+    upstreamReq.on('error', (err) => send502(res, err));
+    req.pipe(upstreamReq);
+  }
 
+  // WebSocket upgrade: open a raw TCP/TLS socket to the dev server, replay the
+  // upgrade request with masqueraded headers, then pipe both directions raw.
+  // No WebSocket library needed — HTTP is transparent after the 101 handshake.
+  function proxyUpgrade(req, clientSocket, head) {
+    const headers = masqueradeRequestHeaders(req);
+    // WebSocket handshakes are request/response, not chunked: force a definite
+    // framing so the dev server parses the request as a single block.
+    headers.connection = 'Upgrade';
+    headers['proxy-connection'] = undefined;
+
+    const raw = Object.entries(headers)
+      .filter(([, v]) => v !== undefined)
+      .flatMap(([k, v]) => (Array.isArray(v) ? v.map((val) => `${k}: ${val}`) : [`${k}: ${v}`]));
+    const handshake = `${req.method} ${req.url} HTTP/1.1\r\n${raw.join('\r\n')}\r\n\r\n`;
+
+    const connect = (cb) => {
+      if (upstreamIsHttps) {
+        const socket = tls.connect(
+          { host: normalizedHost, port: targetPort, rejectUnauthorized: false, servername: normalizedHost },
+          cb
+        );
+        return socket;
+      }
+      const socket = net.connect({ host: normalizedHost, port: targetPort }, cb);
+      return socket;
+    };
+
+    let upstreamSocket;
+    try {
+      upstreamSocket = connect(() => {
+        upstreamSocket.write(handshake);
+        if (head?.length) upstreamSocket.write(head);
+      });
+    } catch (_) {
+      clientSocket.destroy();
+      return;
+    }
+
+    upstreamSocket.setNoDelay(true);
+    upstreamSocket.on('error', () => clientSocket.destroy());
+    clientSocket.on('error', () => upstreamSocket.destroy());
+    clientSocket.setNoDelay(true);
+
+    // Wait for the 101 (or any failure status) before wiring raw pipes.
+    let buffered = Buffer.alloc(0);
+    const onUpstreamData = (chunk) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const end = buffered.indexOf('\r\n\r\n');
+      if (end === -1) {
+        if (buffered.length > 64 * 1024) {
+          upstreamSocket.destroy();
+          clientSocket.destroy();
+        }
+        return;
+      }
+      upstreamSocket.removeListener('data', onUpstreamData);
+      const status = Number(buffered.toString('latin1').split(' ')[1]);
+      if (status !== 101) {
+        clientSocket.write(buffered.subarray(0, end + 4));
+        clientSocket.destroy();
+        upstreamSocket.destroy();
+        return;
+      }
+      clientSocket.write(buffered);
+      upstreamSocket.pipe(clientSocket);
+      clientSocket.pipe(upstreamSocket);
+    };
+    upstreamSocket.on('data', onUpstreamData);
+  }
 
   const server = http.createServer((req, res) => {
     if (req.url?.split('?', 1)[0] === '/__devhop/inspect') {
@@ -190,8 +277,10 @@ export function createMasqueradeProxy({
       res.end(INSPECT_PAGE);
       return;
     }
-    proxy.web(req, res);
+    proxyWebRequest(req, res);
   });
+
+  server.on('upgrade', proxyUpgrade);
 
   server.on('connection', (socket) => {
     socket.setNoDelay(true);
@@ -205,5 +294,10 @@ export function createMasqueradeProxy({
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   });
 
-  return { server, proxy };
+  return {
+    server,
+    close: () => {
+      try { server.close(); } catch (_) {}
+    }
+  };
 }

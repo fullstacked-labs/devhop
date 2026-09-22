@@ -7,7 +7,7 @@ import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { copyToClipboard } from './clipboard.js';
 
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 
 const AIRPORT_CITIES = {
   ARN: 'Stockholm', LHR: 'London', FRA: 'Frankfurt', CDG: 'Paris', AMS: 'Amsterdam',
@@ -151,7 +151,7 @@ export async function run(args = []) {
   let edgeLocation = null;
 
   // Create reverse proxy with header masquerade & response rewriting
-  const { server, proxy } = createMasqueradeProxy({
+  const { server } = createMasqueradeProxy({
     targetPort,
     targetHost,
     targetProtocol,
@@ -174,7 +174,6 @@ export async function run(args = []) {
     if (shortcuts) shortcuts.close();
     if (tunnelHandle) tunnelHandle.close();
     try { server.close(); } catch (_) {}
-    try { proxy.close(); } catch (_) {}
     if (!isJson) console.log(`\n${pc.yellow('✔')} Tunnel disconnected. Cleaned up.\n`);
   };
   const quit = () => { cleanup(); process.exit(0); };
