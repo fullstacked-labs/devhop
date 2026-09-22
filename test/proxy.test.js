@@ -286,7 +286,7 @@ test('Proxy handles dev server restarts: returns 502 when down and resumes when 
   assert.strictEqual(upText, 'online');
 });
 
-test('Proxy safely streams chunked SSE response without buffering', async (t) => {
+test('Proxy streams chunked SSE response without buffering', async (t) => {
   const backendPort = await findFreePort();
   const proxyPort = await findFreePort();
 
