@@ -96,6 +96,18 @@ export async function run(args = []) {
   let targetHost = '127.0.0.1';
   let targetProtocol = 'http:';
   const targetArg = args.find((a) => !a.startsWith('-') && parseTarget(a));
+  // An explicit argument that fails to parse must error, not fall through to
+  // auto-detection — otherwise a typo like `devhop 99999` silently tunnels
+  // whatever unrelated server happens to be running.
+  const invalidArg = args.find((a) => !a.startsWith('-') && !parseTarget(a));
+  if (invalidArg && !targetArg) {
+    console.error(pc.red(`\nInvalid target: "${invalidArg}"`));
+    console.error(`Expected a port, host:port, or http(s):// URL. Examples:`);
+    console.error(`  ${pc.cyan('npx devhop 3000')}`);
+    console.error(`  ${pc.cyan('npx devhop localhost:5173')}`);
+    console.error(`  ${pc.cyan('npx devhop https://localhost:8443')}\n`);
+    process.exit(1);
+  }
   if (targetArg) {
     const parsed = parseTarget(targetArg);
     targetPort = parsed.port;

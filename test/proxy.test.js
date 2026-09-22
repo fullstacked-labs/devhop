@@ -580,3 +580,22 @@ fi
   assert.ok(events.some((e) => e.startsWith('url:https://retry-test.trycloudflare.com')), 'second attempt must surface a URL');
   assert.ok(events.some((e) => e.startsWith('close:0:true')), 'must close cleanly after successful retry');
 });
+
+test('Invalid explicit target errors instead of silently auto-detecting', async () => {
+  const { run } = await import('../src/cli.js');
+  const originalError = console.error;
+  const originalExit = process.exit;
+  const output = [];
+  console.error = (...a) => output.push(a.join(' '));
+  process.exit = (code) => { throw new Error(`exit:${code}`); };
+  try {
+    await run(['99999']);
+    assert.fail('must not reach tunnel startup');
+  } catch (err) {
+    assert.match(err.message, /exit:1/);
+  } finally {
+    console.error = originalError;
+    process.exit = originalExit;
+  }
+  assert.match(output.join('\n'), /Invalid target: "99999"/);
+});
