@@ -169,8 +169,7 @@ export async function run(args = []) {
   };
   const quit = () => { cleanup(); process.exit(0); };
   const renderDashboard = () => {
-    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation);
-    if (shortcuts) console.log(pc.dim('  press h + enter to show help'));
+    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation, Boolean(shortcuts));
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
     process.on(sig, quit);
@@ -226,8 +225,11 @@ export async function run(args = []) {
   });
 }
 
-function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation) {
+function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation, showShortcutsHint = false) {
   const scheme = targetProtocol === 'https:' ? 'https' : 'http';
+  // Display-only: newer cloudflared reports IATA + connection index (e.g. ARN02);
+  // humans only need the airport code.
+  const iata = edgeLocation && /^([A-Z]{3})\d{1,2}$/.test(edgeLocation) ? edgeLocation.slice(0, 3) : edgeLocation;
   console.clear();
   console.log('');
   console.log(pc.bold(pc.bgCyan(pc.black(' 🦘 DEVHOP '))));
@@ -236,7 +238,7 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);
   console.log('');
   if (edgeLocation) {
-    console.log(`  ${pc.green('✔')} Connected to Cloudflare Edge [${edgeLocation}]`);
+    console.log(`  ${pc.green('✔')} Connected to Cloudflare Edge [${iata}]`);
   }
   console.log(`  ${pc.green('✔')} ${pc.dim('Live updates on save active (phone refreshes automatically as you edit)')}`);
   console.log(`  ${pc.green('✔')} ${pc.dim('Real HTTPS padlock active (microphone, camera & voice dictation work)')}`);
@@ -244,12 +246,23 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log(`  ${pc.green('✔')} ${pc.dim('Zero setup (no accounts, no tokens, no certificates to install)')}`);
   if (showQr) {
     console.log(pc.dim('  Scan with your iPhone or Android camera:'));
+    console.log('');
     qrcode.generate(url, { small: true }, (qr) => {
-      const indentedQr = qr.split('\n').map((line) => '  ' + line).join('\n');
-      console.log(indentedQr);
+      // Explicit fg/bg colors: qrcode-terminal emits bare half-block chars, so on
+      // dark themes the modules inherit a loud default color. ▀/▄/█ get white ink,
+      // spaces (dark modules) get a black background — theme-independent, classic
+      // white-slab QR, and stripping the ANSI leaves the characters identical.
+      const styled = qr.split('\n').map((line) =>
+        '  ' + pc.bgBlack(pc.white(line))
+      ).join('\n');
+      console.log(styled);
     });
   }
 
+  console.log('');
   console.log(pc.dim('  Press ') + pc.bold('Ctrl+C') + pc.dim(' to stop the tunnel and disconnect.'));
+  if (showShortcutsHint) {
+    console.log(pc.dim('  press h + enter to show help'));
+  }
   console.log('');
 }
