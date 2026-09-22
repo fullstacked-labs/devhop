@@ -6,10 +6,6 @@
   },
   "description": "Hop local web dev servers onto your phone in seconds with live updates, real HTTPS, and working microphone/camera permissions.",
   "type": "module",
-  "main": "src/index.js",
-  "exports": {
-    ".": "./src/index.js"
-  },
   "bin": {
     "devhop": "bin/devhop.js"
   },

@@ -6,15 +6,10 @@ import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { copyToClipboard } from './clipboard.js';
+import { createRequire } from 'node:module';
 
-const VERSION = '0.1.4';
+const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 
-const AIRPORT_CITIES = {
-  ARN: 'Stockholm', LHR: 'London', FRA: 'Frankfurt', CDG: 'Paris', AMS: 'Amsterdam',
-  JFK: 'New York', EWR: 'Newark', SFO: 'San Francisco', LAX: 'Los Angeles',
-  ORD: 'Chicago', DFW: 'Dallas', IAD: 'Washington DC', ATL: 'Atlanta',
-  NRT: 'Tokyo', HND: 'Tokyo', SIN: 'Singapore', SYD: 'Sydney', HKG: 'Hong Kong'
-};
 export function printHelp() {
   console.log(`
 ${pc.bold(pc.cyan('🦘 devhop'))} ${pc.dim(`v${VERSION}`)}
@@ -90,8 +85,7 @@ export async function run(args = []) {
   }
   const isJson = args.includes('--json');
   const showQr = !args.includes('--no-qr') && !isJson;
-  const protocolIdx = args.indexOf('--protocol');
-  const protocol = (args.includes('--http2') || (protocolIdx !== -1 && args[protocolIdx + 1] === 'http2')) ? 'http2' : undefined;
+  const protocol = args.includes('--http2') ? 'http2' : undefined;
   let targetPort = null;
   let targetHost = '127.0.0.1';
   let targetProtocol = 'http:';
@@ -202,9 +196,8 @@ export async function run(args = []) {
       if (shortcuts && args.includes('--copy')) copyToClipboard(url);
     },
     onLocation: (loc) => {
-      const formatted = AIRPORT_CITIES[loc] ? `${loc} (${AIRPORT_CITIES[loc]})` : loc;
-      if (formatted !== edgeLocation) {
-        edgeLocation = formatted;
+      if (loc !== edgeLocation) {
+        edgeLocation = loc;
         if (publicUrl && !isJson) renderDashboard();
       }
     },

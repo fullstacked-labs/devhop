@@ -149,12 +149,7 @@ export function createMasqueradeProxy({
       headers['set-cookie'] = cookies.map((cookie) => cookie.replace(DOMAIN_COOKIE_PATTERN, ''));
     }
 
-    // 4. Ensure streaming / SSE responses are not buffered by edge tunnels
-    if (headers['content-type']?.includes('text/event-stream')) {
-      headers['x-accel-buffering'] = 'no';
-    }
-
-    // 5. Strip hop-by-hop headers; Node re-derives framing from the body stream.
+    // 4. Strip hop-by-hop headers; Node re-derives framing from the body stream.
     for (const name of HOP_BY_HOP) delete headers[name];
     return headers;
   }

@@ -120,7 +120,6 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
   launch();
 
   return {
-    child: current,
     close: () => {
       manualClose = true;
       try {

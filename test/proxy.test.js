@@ -319,7 +319,6 @@ test('Proxy safely streams chunked SSE response without buffering', async (t) =>
   const res = await fetch(`http://127.0.0.1:${proxyPort}/stream`);
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.headers.get('content-type'), 'text/event-stream');
-  assert.strictEqual(res.headers.get('x-accel-buffering'), 'no', 'Should disable buffering for SSE');
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
