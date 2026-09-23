@@ -159,26 +159,10 @@ npx devhop                   Auto-detect active dev server port
 npx devhop [target]          Expose port, host:port, or URL with QR code
 npx devhop [target] --no-qr  Expose target without printing QR code
 npx devhop [target] --json   Output tunnel JSON (for AI agents & scripts)
-npx devhop [target] --copy   Copy the tunnel URL to the clipboard when the tunnel is ready
 npx devhop [target] --http2  Route tunnel over HTTP/2 (corporate firewall bypass)
 npx devhop --help            Show help message
 npx devhop --version         Show version
 ```
-
-### Keyboard shortcuts and clipboard
-
-In an interactive terminal, type a shortcut followed by **Enter**:
-
-| Shortcut | Action |
-| --- | --- |
-| `c` + Enter | Copy the tunnel URL to your clipboard |
-| `o` + Enter | Open the tunnel URL in your desktop browser |
-| `q` + Enter | Quit and disconnect the tunnel (same cleanup as Ctrl+C) |
-| `h` + Enter | Show shortcut help |
-
-Your clipboard is untouched on startup unless you opt in with `npx devhop 3000 --copy`.
-Copying tries terminal clipboard support (OSC 52, including tmux/SSH), then an available native clipboard tool.
-Shortcuts and clipboard copying are disabled with piped stdin, in CI, and with `--json`.
 
 ### Mobile inspector
 

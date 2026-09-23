@@ -1,11 +1,8 @@
-import readline from 'node:readline';
-import { spawn } from 'node:child_process';
 import qrcode from 'qrcode-terminal';
 import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
-import { copyToClipboard } from './clipboard.js';
 import { createRequire } from 'node:module';
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json');
@@ -39,39 +36,6 @@ ${pc.bold('What it does:')}
 `);
 }
 
-export function setupShortcuts(args, { getUrl, quit }) {
-  if (!process.stdin.isTTY || process.env.CI || args.includes('--json')) return null;
-
-  const input = readline.createInterface({ input: process.stdin });
-  input.on('line', (line) => {
-    switch (line.trim()) {
-      case 'c':
-        if (getUrl()) copyToClipboard(getUrl());
-        break;
-      case 'o': {
-        const url = getUrl();
-        if (!url) break;
-        try {
-          const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open';
-          const commandArgs = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
-          const child = spawn(command, commandArgs, { stdio: 'ignore', detached: true });
-          child.on('error', (err) => console.error(`Could not open browser: ${err.message}`));
-          child.unref();
-        } catch (err) {
-          console.error(`Could not open browser: ${err.message}`);
-        }
-        break;
-      }
-      case 'q':
-        quit();
-        break;
-      case 'h':
-        console.log('\n  c + enter  copy tunnel URL\n  o + enter  open in browser\n  q + enter  quit\n  h + enter  show help\n');
-        break;
-    }
-  });
-  return input;
-}
 
 export async function run(args = []) {
   if (args.includes('--help') || args.includes('-h')) {
@@ -157,19 +121,17 @@ export async function run(args = []) {
   }
   let cleanedUp = false;
   let tunnelHandle = null;
-  let shortcuts = null;
 
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    if (shortcuts) shortcuts.close();
     if (tunnelHandle) tunnelHandle.close();
     try { server.close(); } catch (_) {}
     if (!isJson) console.log(`\n${pc.yellow('✔')} Tunnel disconnected. Cleaned up.\n`);
   };
   const quit = () => { cleanup(); process.exit(0); };
   const renderDashboard = () => {
-    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation, Boolean(shortcuts));
+    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation);
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
     process.on(sig, quit);
@@ -186,13 +148,11 @@ export async function run(args = []) {
     protocol,
     onUrl: (url) => {
       publicUrl = url;
-      shortcuts = setupShortcuts(args, { getUrl: () => publicUrl, quit });
       if (isJson) {
         console.log(JSON.stringify({ url, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol }));
       } else {
         renderDashboard();
       }
-      if (shortcuts && args.includes('--copy')) copyToClipboard(url);
     },
     onLocation: (loc) => {
       if (loc !== edgeLocation) {
@@ -225,7 +185,7 @@ export async function run(args = []) {
   });
 }
 
-function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation, showShortcutsHint = false) {
+function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation) {
   const scheme = targetProtocol === 'https:' ? 'https' : 'http';
   // Display-only: newer cloudflared reports IATA + connection index (e.g. ARN02);
   // humans only need the airport code.
@@ -261,8 +221,5 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
 
   console.log('');
   console.log(pc.dim('  Press ') + pc.bold('Ctrl+C') + pc.dim(' to stop the tunnel and disconnect.'));
-  if (showShortcutsHint) {
-    console.log(pc.dim('  press h + enter to show help'));
-  }
   console.log('');
 }

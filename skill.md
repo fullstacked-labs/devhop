@@ -34,28 +34,12 @@ npx devhop https://localhost:8443
 # Loopback self-signed certificates are accepted; a wrong scheme returns 502 with a retry hint.
 # Output clean JSON for automation (`url`, `target`, `port`, `host`, `protocol`)
 npx devhop 3000 --json
-# Copy the tunnel URL automatically once it is ready (interactive terminals)
-npx devhop 3000 --copy
-
 # Run without printing terminal QR code (useful for headless / CI logs)
 npx devhop --no-qr
 
 # Corporate firewall bypass: route tunnel over HTTP/2 (TCP 443) when UDP/QUIC is blocked
 npx devhop 3000 --http2
 ```
-
-### Interactive shortcuts
-
-In an interactive terminal (not CI, piped stdin, or `--json`):
-
-| Input | Action |
-| --- | --- |
-| `c` + Enter | Copy the tunnel URL |
-| `o` + Enter | Open the tunnel URL in a browser |
-| `q` + Enter | Quit and disconnect |
-| `h` + Enter | Show shortcut help |
-
-`--copy` opts into copying when the tunnel URL is ready; otherwise the clipboard is untouched until `c`.
 
 ## How It Works
 1. **Instant trusted HTTPS**: Creates a temporary, trusted HTTPS link via Cloudflare's edge with zero account setup.
