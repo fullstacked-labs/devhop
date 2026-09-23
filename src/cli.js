@@ -3,6 +3,7 @@ import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
+import { startGateway } from './gateway/client.js';
 import { createRequire } from 'node:module';
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json');
@@ -50,6 +51,17 @@ export async function run(args = []) {
   const isJson = args.includes('--json');
   const showQr = !args.includes('--no-qr') && !isJson;
   const protocol = args.includes('--http2') ? 'http2' : undefined;
+  const gatewayIdx = args.findIndex((a) => a === '--gateway' || a.startsWith('--gateway='));
+  let gatewayUrl = null;
+  if (gatewayIdx !== -1) {
+    gatewayUrl = args[gatewayIdx].startsWith('--gateway=') ? args[gatewayIdx].slice(10) : args[gatewayIdx + 1];
+    // R12: --gateway <url> — ws:// for local/test relays, wss:// for prod.
+    if (!gatewayUrl || gatewayUrl.startsWith('-') || !/^wss?:\/\//.test(gatewayUrl)) {
+      console.error(pc.red(`\nInvalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.`));
+      console.error(`Example: ${pc.cyan('devhop --gateway wss://devhop.se')}\n`);
+      process.exit(1);
+    }
+  }
   let targetPort = null;
   let targetHost = '127.0.0.1';
   let targetProtocol = 'http:';
@@ -95,10 +107,12 @@ export async function run(args = []) {
 
   if (!isJson) console.log(`\n${pc.cyan('●')} Initializing ${pc.bold('devhop')} for port ${pc.bold(targetPort)}...`);
 
-  // Ensure cloudflared binary exists
-  const binPath = await ensureBinary((msg) => {
-    if (!isJson) console.log(`${pc.dim('  ' + msg)}`);
-  });
+  // R12: no cloudflared download in gateway mode.
+  const binPath = gatewayUrl
+    ? null
+    : await ensureBinary((msg) => {
+        if (!isJson) console.log(`${pc.dim('  ' + msg)}`);
+      });
   // Pick an ephemeral local proxy port
   const proxyPort = await findFreePort();
 
@@ -142,10 +156,7 @@ export async function run(args = []) {
     process.exit(1);
   });
   process.on('exit', cleanup);
-  tunnelHandle = startTunnel({
-    localPort: proxyPort,
-    binPath,
-    protocol,
+  const callbacks = {
     onUrl: (url) => {
       publicUrl = url;
       if (isJson) {
@@ -154,35 +165,64 @@ export async function run(args = []) {
         renderDashboard();
       }
     },
-    onLocation: (loc) => {
-      if (loc !== edgeLocation) {
-        edgeLocation = loc;
-        if (publicUrl && !isJson) renderDashboard();
-      }
-    },
     onRetry: () => {
-      if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
+      if (!isJson) console.log(pc.yellow('↻ Tunnel dropped — reconnecting...'));
     },
     onError: (err) => {
-      console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
+      console.error(pc.red(`\nTunnel failed: ${err.message}`));
       cleanup();
       process.exit(1);
     },
-    onClose: (code, details) => {
+    onClose: () => {
       if (!cleanedUp) {
-        const isError = (code !== 0 && code !== null) || (!details?.urlFound);
-        if (isError) {
-          const exitDesc = code !== null ? `code ${code}` : `signal ${details?.signal || 'UNKNOWN'}`;
-          console.error(pc.red(`\ncloudflared exited unexpectedly (${exitDesc}):`));
-          if (details?.recentOutput) {
-            console.error(pc.dim(details.recentOutput.split('\n').map((l) => '  > ' + l).join('\n')));
-          }
-        }
         cleanup();
-        process.exit(typeof code === 'number' && code !== 0 ? code : (isError ? 1 : 0));
+        process.exit(1);
       }
     }
-  });
+  };
+  if (gatewayUrl) {
+    tunnelHandle = startGateway({
+      localPort: proxyPort,
+      gatewayUrl,
+      token: process.env.DEVHOP_GATEWAY_TOKEN || '',
+      ...callbacks
+    });
+  } else {
+    tunnelHandle = startTunnel({
+      localPort: proxyPort,
+      binPath,
+      protocol,
+      onLocation: (loc) => {
+        if (loc !== edgeLocation) {
+          edgeLocation = loc;
+          if (publicUrl && !isJson) renderDashboard();
+        }
+      },
+      onRetry: () => {
+        if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
+      },
+      ...callbacks,
+      onError: (err) => {
+        console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
+        cleanup();
+        process.exit(1);
+      },
+      onClose: (code, details) => {
+        if (!cleanedUp) {
+          const isError = (code !== 0 && code !== null) || (!details?.urlFound);
+          if (isError) {
+            const exitDesc = code !== null ? `code ${code}` : `signal ${details?.signal || 'UNKNOWN'}`;
+            console.error(pc.red(`\ncloudflared exited unexpectedly (${exitDesc}):`));
+            if (details?.recentOutput) {
+              console.error(pc.dim(details.recentOutput.split('\n').map((l) => '  > ' + l).join('\n')));
+            }
+          }
+          cleanup();
+          process.exit(typeof code === 'number' && code !== 0 ? code : (isError ? 1 : 0));
+        }
+      }
+    });
+  }
 }
 
 function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation) {
