@@ -3,4 +3,4 @@ node_modules/
 *.log
 research/
 .serena/
-node_modules
+.agents/
