@@ -16,6 +16,7 @@ npx devhop [port]
 
   Target:       http://localhost:3000
   Mobile URL:   https://breeze-sunset-vintage-glade.trycloudflare.com
+  ⚠ Public link — anyone with it can open your dev server. Ctrl+C when done.
 
   ✔ Connected to Cloudflare Edge [ARN]
 
@@ -177,7 +178,7 @@ npx devhop 3000 --http2
 
 Read this before running devhop:
 
-- **Your dev server is reachable from the public internet** for as long as the tunnel runs. Anyone with the URL can hit it. Close the tunnel (Ctrl+C / `q`) when you step away.
+- **Your dev server is reachable from the public internet** for as long as the tunnel runs. Anyone with the URL can hit it. Close the tunnel (Ctrl+C) when you step away.
 - **Header masquerading is intentional.** devhop rewrites `Host`, `Origin`, and `Referer` so your dev server treats the phone as trusted loopback — which also means dev-mode origin and CSRF protections (Next.js `allowedDevOrigins`, Vite `allowedHosts`) are bypassed for everyone, not just your phone.
 - Run only dev servers you're actively working on. Never point devhop at anything containing real credentials or user data.
 

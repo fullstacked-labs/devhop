@@ -230,6 +230,7 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log('');
   console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${targetHost}:${targetPort}`)}`);
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);
+  console.log(`  ${pc.yellow('⚠ Public link — anyone with it can open your dev server. Ctrl+C when done.')}`);
   console.log('');
   if (edgeLocation) {
     console.log(`  ${pc.green('✔')} Connected to Cloudflare Edge [${iata}]`);
