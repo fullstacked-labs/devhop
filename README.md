@@ -207,7 +207,7 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
   | `event` | When | Fields |
   | --- | --- | --- |
   | `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol` |
-  | `reconnecting` | The tunnel is retrying | `attempt` (when known) |
+  | `reconnecting` | The tunnel is retrying | `attempt` |
   | `error` | Before exiting non-zero | `code`, `message` |
   | `closed` | After Ctrl+C or SIGTERM | none |
   | `doctor` | `npx devhop --doctor --json` | the diagnostics fields: `devhop`, `node`, `platform`, `arch`, `cloudflared`, `devPorts`, `cacheDir` |
