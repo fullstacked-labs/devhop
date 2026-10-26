@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       - run: npm ci
       - name: Install fixture
         working-directory: smoke/fixtures/${{ matrix.fixture }}
@@ -45,6 +45,6 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       - run: npm ci
       - run: node smoke/canary.js
