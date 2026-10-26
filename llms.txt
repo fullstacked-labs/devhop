@@ -16,6 +16,6 @@
 - Upstream HTTPS accepts self-signed certificates on loopback. A wrong scheme returns `502` with a hint to retry using the matching URL scheme; example: `npx devhop https://localhost:8443`.
 - Generates compact Unicode terminal QR code for instant phone camera scanning.
 - Mobile inspector: `https://<tunnel>/__devhop/inspect` provides an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes without modifying the app HTML.
-- Agent-ready: provides `--json` flag for automated AI coding agent workflows.
+- Agent-ready: `--json` prints one JSON event per line on stdout (`ready`, `reconnecting`, `error` with a stable `code`, `closed`) so coding agents can act on failures.
 - Corporate firewall bypass: `npx devhop [target] --http2` routes the tunnel over HTTP/2 (TCP 443) when UDP/QUIC is blocked.
 - Zero signup, zero accounts, zero cloud config, zero system daemons.

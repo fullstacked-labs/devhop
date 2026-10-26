@@ -197,10 +197,22 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
 `devhop` is designed so AI coding assistants (Claude Code, Cursor, Windsurf, OMP) can launch and manage mobile previews for you:
 * **[`skills/devhop/SKILL.md`](./skills/devhop/SKILL.md)**: an [Agent Skills](https://agentskills.io) skill, so coding agents know when and how to put your app on a phone.
 * **`llms.txt`**: Machine-readable reference for LLM tools.
-* **`--json` Flag**: Run `npx devhop 3000 --json` for structured, non-interactive output:
+* **`--json` Flag**: Run `npx devhop 3000 --json` and read stdout, which carries one JSON object per line:
+
+  | `event` | When | Fields |
+  | --- | --- | --- |
+  | `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol` |
+  | `reconnecting` | The tunnel is retrying | `attempt` (when known) |
+  | `error` | Before exiting non-zero | `code`, `message` |
+  | `closed` | After Ctrl+C or SIGTERM | none |
+
   ```json
-  {"url":"https://example.trycloudflare.com","target":"http://127.0.0.1:3000","port":3000,"host":"127.0.0.1","protocol":"http:"}
+  {"event":"ready","url":"https://example.trycloudflare.com","inspectUrl":"https://example.trycloudflare.com/__devhop/inspect","target":"http://127.0.0.1:3000","port":3000,"host":"127.0.0.1","protocol":"http:"}
+  {"event":"reconnecting","attempt":1}
+  {"event":"error","code":"NO_DEV_SERVER","message":"No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000."}
   ```
+
+  Error codes: `INVALID_TARGET`, `INVALID_GATEWAY_URL`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `GATEWAY_FAILED`, `UNCAUGHT`.
 
 ---
 

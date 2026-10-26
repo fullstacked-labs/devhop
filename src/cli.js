@@ -43,6 +43,7 @@ export async function run(args = []) {
     return;
   }
   const isJson = args.includes('--json');
+  const emit = (obj) => { if (isJson) console.log(JSON.stringify(obj)); };
   const showQr = !args.includes('--no-qr') && !isJson;
   const protocol = args.includes('--http2') ? 'http2' : undefined;
   const gatewayIdx = args.findIndex((a) => a === '--gateway' || a.startsWith('--gateway='));
@@ -51,6 +52,7 @@ export async function run(args = []) {
     gatewayUrl = args[gatewayIdx].startsWith('--gateway=') ? args[gatewayIdx].slice(10) : args[gatewayIdx + 1];
     // ws:// is for local/test relays, wss:// for real ones.
     if (!gatewayUrl || gatewayUrl.startsWith('-') || !/^wss?:\/\//.test(gatewayUrl)) {
+      emit({ event: 'error', code: 'INVALID_GATEWAY_URL', message: `Invalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.` });
       console.error(pc.red(`\nInvalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.`));
       console.error(`Example: ${pc.cyan('devhop --gateway wss://relay.example.com')}\n`);
       process.exit(1);
@@ -68,6 +70,7 @@ export async function run(args = []) {
   // whatever unrelated server happens to be running.
   const invalidArg = args.find((a) => !a.startsWith('-') && !parseTarget(a));
   if (invalidArg && !targetArg) {
+    emit({ event: 'error', code: 'INVALID_TARGET', message: `Invalid target: "${invalidArg}" — expected a port, host:port, or http(s) URL.` });
     console.error(pc.red(`\nInvalid target: "${invalidArg}" — expected a port, host:port, or http(s) URL.`));
     console.error(`Examples: ${pc.cyan('npx devhop 3000')}, ${pc.cyan('npx devhop localhost:5173')}, ${pc.cyan('npx devhop https://localhost:8443')}\n`);
     process.exit(1);
@@ -93,6 +96,7 @@ export async function run(args = []) {
         console.log(`${pc.dim('  Tip: Specify explicitly with: npx devhop <port>')}`);
       }
     } else {
+      emit({ event: 'error', code: 'NO_DEV_SERVER', message: 'No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000.' });
       console.error(pc.red('\nNo active dev server detected on standard dev ports.'));
       console.error(`Please specify your dev server target explicitly:`);
       console.error(`  ${pc.cyan('npx devhop <port>')}            ${pc.dim('(e.g. npx devhop 3000)')}`);
@@ -105,11 +109,18 @@ export async function run(args = []) {
   if (!isJson) console.log(`\n${pc.cyan('●')} Initializing ${pc.bold('devhop')} for port ${pc.bold(targetPort)}...`);
 
   // Gateway mode doesn't use cloudflared, so skip the download.
-  const binPath = gatewayUrl
-    ? null
-    : await ensureBinary((msg) => {
+  let binPath = null;
+  if (!gatewayUrl) {
+    try {
+      binPath = await ensureBinary((msg) => {
         if (!isJson) console.log(`${pc.dim('  ' + msg)}`);
       });
+    } catch (err) {
+      emit({ event: 'error', code: 'CLOUDFLARED_INSTALL_FAILED', message: err.message });
+      if (!isJson) throw err;
+      process.exit(1);
+    }
+  }
   // Pick an ephemeral local proxy port
   const proxyPort = await findFreePort();
 
@@ -131,6 +142,7 @@ export async function run(args = []) {
     console.log(`${pc.cyan('●')} Connecting secure tunnel to Cloudflare Edge...`);
   }
   let cleanedUp = false;
+  let exitingClean = false;
   let tunnelHandle = null;
 
   const cleanup = () => {
@@ -139,8 +151,9 @@ export async function run(args = []) {
     if (tunnelHandle) tunnelHandle.close();
     try { server.close(); } catch (_) {}
     if (!isJson) console.log(`\n${pc.yellow('✔')} Tunnel disconnected. Cleaned up.\n`);
+    if (exitingClean) emit({ event: 'closed' });
   };
-  const quit = () => { cleanup(); process.exit(0); };
+  const quit = () => { exitingClean = true; cleanup(); process.exit(0); };
   const renderDashboard = () => {
     displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation);
   };
@@ -149,6 +162,7 @@ export async function run(args = []) {
   }
   process.on('uncaughtException', (err) => {
     cleanup();
+    emit({ event: 'error', code: 'UNCAUGHT', message: err.message });
     console.error(pc.red(`\nUncaught error: ${err.message}`));
     process.exit(1);
   });
@@ -157,21 +171,24 @@ export async function run(args = []) {
     onUrl: (url) => {
       publicUrl = url;
       if (isJson) {
-        console.log(JSON.stringify({ url, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol }));
+        emit({ event: 'ready', url, inspectUrl: `${url}/__devhop/inspect`, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol });
       } else {
         renderDashboard();
       }
     },
-    onRetry: () => {
+    onRetry: (attempt) => {
+      emit({ event: 'reconnecting', ...(typeof attempt === 'number' && { attempt }) });
       if (!isJson) console.log(pc.yellow('↻ Tunnel dropped — reconnecting...'));
     },
     onError: (err) => {
+      emit({ event: 'error', code: 'GATEWAY_FAILED', message: err.message });
       console.error(pc.red(`\nTunnel failed: ${err.message}`));
       cleanup();
       process.exit(1);
     },
     onClose: () => {
       if (!cleanedUp) {
+        emit({ event: 'error', code: 'GATEWAY_FAILED', message: 'Gateway connection closed.' });
         cleanup();
         process.exit(1);
       }
@@ -201,6 +218,7 @@ export async function run(args = []) {
       },
       ...callbacks,
       onError: (err) => {
+        emit({ event: 'error', code: 'TUNNEL_START_FAILED', message: err.message });
         console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
         cleanup();
         process.exit(1);
@@ -210,6 +228,7 @@ export async function run(args = []) {
           const isError = (code !== 0 && code !== null) || (!details?.urlFound);
           if (isError) {
             const exitDesc = code !== null ? `code ${code}` : `signal ${details?.signal || 'UNKNOWN'}`;
+            emit({ event: 'error', code: 'TUNNEL_EXITED', message: `cloudflared exited unexpectedly (${exitDesc})` });
             console.error(pc.red(`\ncloudflared exited unexpectedly (${exitDesc}):`));
             if (details?.recentOutput) {
               console.error(pc.dim(details.recentOutput.split('\n').map((l) => '  > ' + l).join('\n')));

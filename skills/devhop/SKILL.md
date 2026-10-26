@@ -41,12 +41,18 @@ npx devhop 3000 --http2             # use when the tunnel fails on networks that
 
 1. Make sure the dev server is running. If you know its port or URL, pass it
    exactly as the dev server printed it.
-2. Run `npx devhop <port> --json` in the background. When the tunnel is up it
-   prints one JSON line with `url`, `target`, `port`, `host` and `protocol`.
+2. Run `npx devhop <port> --json` in the background. Stdout is one JSON object
+   per line with an `event` field. Read lines until `event` is `"ready"`; it
+   carries `url`, `inspectUrl`, `target`, `port`, `host` and `protocol`. Later
+   lines can be `reconnecting` (the tunnel is retrying), `error` (`code` and
+   `message`, followed by a non-zero exit) and `closed`.
 3. Give the user the `url`. If they can see the terminal, tell them to scan
    the QR code there (run without `--json` for that). Keep it plain, for example:
    "Here's your phone preview link. It updates as I edit, and the mic and camera work."
-4. If the tunnel fails to start, retry once with `--http2`.
+4. On an `error` event, act on its `code`:
+   - `NO_DEV_SERVER`: start the dev server, then pass its port.
+   - `TUNNEL_START_FAILED` or `TUNNEL_EXITED`: retry once with `--http2`.
+   - `INVALID_TARGET`: pass the URL exactly as the dev server printed it.
 5. When the user is done, stop devhop with SIGINT (Ctrl+C). It shuts down
    cloudflared with it.
 
