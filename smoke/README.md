@@ -18,6 +18,8 @@ and at least one direct check failed.
 | `hmr` | the HMR WebSocket upgrade returns `101` |
 | `update` | (proxied only) editing the source file sends a message matching `updatePattern` within 30 s |
 
+`smoke.json` may list `warm` paths: requested once before the edit, so Vite has served the module that changes.
+
 The control: if both direct checks pass, the framework does not need devhop and the claim
 would be false, so the run fails. `"updatePatternVerified": false` in a `smoke.json` means
 the pattern has not been confirmed against a real run yet.

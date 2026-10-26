@@ -1,0 +1,9 @@
+{
+  "name": "devhop-smoke-nuxt",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "nuxt": "4.6.2",
+    "vue": "3.5.44"
+  }
+}

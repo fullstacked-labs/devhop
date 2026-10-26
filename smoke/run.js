@@ -38,11 +38,10 @@ async function waitReady(port, spec, child) {
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`dev server exited early (code ${child.exitCode})`);
     try {
-      await get(port, spec.readyPath);
-      return;
-    } catch (_) {
-      await sleep(500);
-    }
+      // Nuxt answers 503 with a "Starting Nuxt..." page until the app is built.
+      if ((await get(port, spec.readyPath)).status !== 503) return;
+    } catch (_) {}
+    await sleep(500);
   }
   throw new Error(`dev server not ready after ${spec.readyTimeoutMs} ms`);
 }
@@ -88,7 +87,7 @@ async function checkMode(port, spec, { keepSocket }) {
   return { result, socket };
 }
 
-async function checkUpdate(spec, fixtureDir, upgrade) {
+async function checkUpdate(spec, fixtureDir, upgrade, port) {
   const file = path.join(fixtureDir, spec.edit.file);
   const original = fs.readFileSync(file, 'utf8');
   if (!original.includes(spec.edit.from)) return false;
@@ -99,6 +98,9 @@ async function checkUpdate(spec, fixtureDir, upgrade) {
     if (collecting) received += text;
   });
   try {
+    // No browser is loading modules, so request the ones the edit touches;
+    // Vite only sends updates for modules it has served.
+    for (const warmPath of spec.warm ?? []) await get(port, warmPath).catch(() => {});
     await sleep(1500);
     collecting = true;
     fs.writeFileSync(file, original.replace(spec.edit.from, spec.edit.to));
@@ -175,7 +177,7 @@ try {
   let update = false;
   if (proxied.socket) {
     try {
-      update = await checkUpdate(spec, fixtureDir, proxied.socket);
+      update = await checkUpdate(spec, fixtureDir, proxied.socket, port);
     } finally {
       proxied.socket.socket.destroy();
     }

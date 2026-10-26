@@ -1,0 +1,33 @@
+{
+  "name": "nuxt",
+  "framework": "nuxt",
+  "packages": [
+    "nuxt",
+    "vue"
+  ],
+  "dev": [
+    "node_modules/.bin/nuxt",
+    "dev",
+    "--port",
+    "{port}",
+    "--host",
+    "127.0.0.1"
+  ],
+  "readyPath": "/",
+  "readyTimeoutMs": 120000,
+  "hmr": {
+    "tokenFrom": {
+      "path": "/_nuxt/@vite/client",
+      "regex": "wsToken\\s*=\\s*\"([^\"]+)\""
+    },
+    "path": "/_nuxt/?token={token}",
+    "protocol": "vite-hmr",
+    "updatePattern": "\"type\":\"(update|full-reload)\""
+  },
+  "updatePatternVerified": true,
+  "edit": {
+    "file": "app/app.vue",
+    "from": "Hello devhop",
+    "to": "Hello again"
+  }
+}

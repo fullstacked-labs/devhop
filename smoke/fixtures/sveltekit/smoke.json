@@ -1,0 +1,38 @@
+{
+  "name": "sveltekit",
+  "framework": "sveltekit",
+  "packages": [
+    "@sveltejs/kit",
+    "svelte",
+    "vite"
+  ],
+  "dev": [
+    "node_modules/.bin/vite",
+    "dev",
+    "--port",
+    "{port}",
+    "--strictPort",
+    "--host",
+    "127.0.0.1"
+  ],
+  "readyPath": "/",
+  "readyTimeoutMs": 60000,
+  "hmr": {
+    "tokenFrom": {
+      "path": "/@vite/client",
+      "regex": "wsToken\\s*=\\s*\"([^\"]+)\""
+    },
+    "path": "/?token={token}",
+    "protocol": "vite-hmr",
+    "updatePattern": "\"type\":\"(update|full-reload)\""
+  },
+  "updatePatternVerified": true,
+  "edit": {
+    "file": "src/routes/+page.svelte",
+    "from": "Hello devhop",
+    "to": "Hello again"
+  },
+  "warm": [
+    "/src/routes/+page.svelte"
+  ]
+}

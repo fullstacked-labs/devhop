@@ -1,0 +1,33 @@
+{
+  "name": "astro",
+  "framework": "astro",
+  "packages": [
+    "astro"
+  ],
+  "dev": [
+    "node_modules/.bin/astro",
+    "dev",
+    "--port",
+    "{port}",
+    "--host",
+    "127.0.0.1",
+    "--ignore-lock"
+  ],
+  "readyPath": "/",
+  "readyTimeoutMs": 60000,
+  "hmr": {
+    "tokenFrom": {
+      "path": "/@vite/client",
+      "regex": "wsToken\\s*=\\s*\"([^\"]+)\""
+    },
+    "path": "/?token={token}",
+    "protocol": "vite-hmr",
+    "updatePattern": "\"type\":\"(update|full-reload)\""
+  },
+  "updatePatternVerified": true,
+  "edit": {
+    "file": "src/pages/index.astro",
+    "from": "Hello devhop",
+    "to": "Hello again"
+  }
+}
