@@ -23,3 +23,13 @@ and at least one direct check failed.
 The control: if both direct checks pass, the framework does not need devhop and the claim
 would be false, so the run fails. `"updatePatternVerified": false` in a `smoke.json` means
 the pattern has not been confirmed against a real run yet.
+
+## Canary
+
+`node smoke/canary.js` runs the real thing end to end: it starts the stub server, runs
+`bin/devhop.js <port> --json`, waits for the `ready` event, fetches the public URL and the
+inspector page through a live trycloudflare tunnel, then sends SIGINT and expects `closed`.
+It needs network access.
+
+trycloudflare has no SLA, so one red night is noise and two in a row are a signal. Don't make the
+canary a required check.

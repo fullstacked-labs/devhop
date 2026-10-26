@@ -1,0 +1,50 @@
+name: smoke
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'smoke/**'
+      - 'src/proxy.js'
+      - '.github/workflows/smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  frameworks:
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [vite-react, next-15, next-16, nuxt, sveltekit, astro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Install fixture
+        working-directory: smoke/fixtures/${{ matrix.fixture }}
+        run: npm install --no-audit --no-fund
+      - run: node smoke/run.js ${{ matrix.fixture }} --json
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-${{ matrix.fixture }}
+          path: smoke-results/
+
+  canary:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node smoke/canary.js
