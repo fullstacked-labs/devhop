@@ -1,0 +1,56 @@
+name: Bug report
+description: devhop started but something doesn't work on the phone
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't paste your tunnel URL here: it's public while the tunnel runs.
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options:
+        - Next.js
+        - Vite
+        - Nuxt
+        - SvelteKit
+        - Astro
+        - Remix / React Router
+        - Angular
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: framework_version
+    attributes:
+      label: Framework version
+      placeholder: next 16.2.3
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and browser
+      placeholder: iPhone 15, iOS 19.1, Safari
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Include any error text from the phone or the dev server terminal.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx devhop --doctor`
+      description: On devhop older than 0.2, give your devhop version, Node version and OS instead.
+      render: text
+    validations:
+      required: true

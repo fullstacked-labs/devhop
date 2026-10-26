@@ -1,0 +1,41 @@
+name: Framework not working
+description: devhop doesn't work with a framework or dev server
+labels: [framework]
+body:
+  - type: input
+    id: framework
+    attributes:
+      label: Framework and version
+      placeholder: remix 3.1.0
+    validations:
+      required: true
+  - type: input
+    id: dev_command
+    attributes:
+      label: Dev command
+      placeholder: npm run dev
+    validations:
+      required: true
+  - type: dropdown
+    id: what_breaks
+    attributes:
+      label: What breaks
+      options:
+        - Page is blocked or errors
+        - Hot reload doesn't update the phone
+        - Login, redirects or cookies
+        - Microphone or camera
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Error text from the phone or the dev server terminal.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx devhop --doctor`
+      description: On devhop older than 0.2, give your devhop version, Node version and OS instead.
+      render: text
