@@ -1,6 +1,6 @@
 import net from 'node:net';
 
-const STANDARD_DEV_PORTS = [3000, 5173, 8080, 4321, 30178];
+const STANDARD_DEV_PORTS = [3000, 5173, 8080, 4321, 4200];
 const EXTENDED_DEV_PORTS = [3001, 3002, 5174, 5175, 8000, 8001, 8888, 5000, 4000, 1234];
 
 export function isPortOpen(port, host = '127.0.0.1', timeout = 300) {
