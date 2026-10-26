@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/devhop.svg)](https://www.npmjs.com/package/devhop)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
-[![Built for AI Agents](https://img.shields.io/badge/AI%20Agent-Skill%20Ready-purple.svg)](./skill.md)
+[![Built for AI Agents](https://img.shields.io/badge/AI%20Agent-Skill%20Ready-purple.svg)](./skills/devhop/SKILL.md)
 
 > **Hop your local web dev server onto your phone in seconds. Live updates as you edit code, real HTTPS for camera and microphone access, and zero configuration.**
 
@@ -196,7 +196,7 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
 ## AI Agent Integration
 
 `devhop` is designed so AI coding assistants (Claude Code, Cursor, Windsurf, OMP) can launch and manage mobile previews for you:
-* **`skill.md`**: Follows the Agent Skills standard so coding agents know when and how to test your app on mobile.
+* **[`skills/devhop/SKILL.md`](./skills/devhop/SKILL.md)**: an [Agent Skills](https://agentskills.io) skill, so coding agents know when and how to put your app on a phone.
 * **`llms.txt`**: Machine-readable reference for LLM tools.
 * **`--json` Flag**: Run `npx devhop 3000 --json` for structured, non-interactive output:
   ```json

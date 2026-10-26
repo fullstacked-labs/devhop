@@ -14,7 +14,7 @@
     "src",
     "README.md",
     "LICENSE",
-    "skill.md",
+    "skills",
     "llms.txt"
   ],
   "engines": {
