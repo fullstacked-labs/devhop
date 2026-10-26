@@ -1,6 +1,6 @@
 {
   "name": "devhop",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public"
   },
@@ -15,7 +15,8 @@
     "README.md",
     "LICENSE",
     "skills",
-    "llms.txt"
+    "llms.txt",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20.0.0"
