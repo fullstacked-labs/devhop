@@ -4,3 +4,5 @@ node_modules
 research/
 .serena/
 .agents/
+smoke/fixtures/*/node_modules/
+smoke-results/

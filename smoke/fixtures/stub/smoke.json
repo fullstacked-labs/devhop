@@ -1,0 +1,13 @@
+{
+  "name": "stub",
+  "framework": "stub",
+  "packages": [],
+  "dev": ["node", "server.js", "{port}"],
+  "readyPath": "/",
+  "readyTimeoutMs": 10000,
+  "hmr": {
+    "path": "/hmr",
+    "updatePattern": "\"type\":\"update\""
+  },
+  "edit": { "file": "watched.txt", "from": "a", "to": "b" }
+}
