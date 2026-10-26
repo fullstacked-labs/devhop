@@ -223,10 +223,11 @@ export async function run(args = []) {
           if (publicUrl && !isJson) renderDashboard();
         }
       },
-      onRetry: () => {
+      ...callbacks,
+      onRetry: (attempt) => {
+        emit({ event: 'reconnecting', attempt });
         if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
       },
-      ...callbacks,
       onError: (err) => {
         emit({ event: 'error', code: 'TUNNEL_START_FAILED', message: err.message });
         console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
