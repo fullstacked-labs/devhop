@@ -6,3 +6,9 @@ research/
 .agents/
 smoke/fixtures/*/node_modules/
 smoke-results/
+smoke/fixtures/*/.next/
+smoke/fixtures/*/.nuxt/
+smoke/fixtures/*/.output/
+smoke/fixtures/*/.svelte-kit/
+smoke/fixtures/*/.astro/
+smoke/fixtures/*/dist/

@@ -1,0 +1,9 @@
+{
+  "name": "devhop-smoke-next-16",
+  "private": true,
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}
