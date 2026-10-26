@@ -1,21 +1,28 @@
 # devhop
-> Zero-config mobile dev proxy for testing local web apps on physical phones with live updates on save, Next.js Server Actions, and working microphone/camera permissions.
+> Zero-config CLI that puts a local web dev server on a phone: a Cloudflare quick tunnel for trusted HTTPS plus a small proxy so dev servers accept the tunnel host. Hot reload, mic and camera access, and a terminal QR code.
 
-- CLI: `npx devhop [target]`
+- CLI: `npx devhop [target]` (Node.js 20 or newer)
 - Repo: https://github.com/fullstacked-labs/devhop
 - npm: https://www.npmjs.com/package/devhop
 - Docs: https://github.com/fullstacked-labs/devhop#readme
+- Agent skill: https://github.com/fullstacked-labs/devhop/blob/main/skills/devhop/SKILL.md
+
+## Tested frameworks
+Checked nightly in CI (page loads and hot reload works through the tunnel, and the same checks fail without devhop): Vite 8 (React), Next.js 16, Nuxt 4, SvelteKit 3, Astro 7.
 
 ## Key Capabilities
-- Live updates on save: Preserves the live WebSocket connection so phones refresh automatically when code is saved.
-- Solves Next.js `allowedDevOrigins` cross-origin blocking and Server Actions CSRF mismatch (`x-action-redirect`).
-- Solves Vite 6+ `server.allowedHosts` "host not allowed" 403 Forbidden errors.
-- Grants Mobile Safari & Android Chrome full permissions for microphone (`getUserMedia`), camera, WebCrypto, and Passkeys via trusted HTTPS.
-- Relabels Host, Origin, and Referer headers in-process to `localhost:<port>` so dev servers treat the phone as local loopback traffic.
+- Vite-based servers answer 403 `Blocked request. This host ("...") is not allowed.` for the tunnel host; devhop rewrites Host, Origin and Referer to `localhost:<port>` so no `allowedHosts` edit is needed.
+- Next.js 16 refuses the `/_next/hmr` WebSocket from a tunnel host (`allowedDevOrigins`); devhop makes hot reload work without that config.
+- Trusted HTTPS gives Mobile Safari and Android Chrome a secure context for microphone and camera (`getUserMedia`), WebCrypto and Passkeys.
 - Tolerant input parsing: accepts bare ports (`3000`), `host:port`, and HTTP(S) URLs such as `http://localhost:5173` or `https://localhost:8443`; a bare `443` implies HTTPS.
-- Upstream HTTPS accepts self-signed certificates on loopback. A wrong scheme returns `502` with a hint to retry using the matching URL scheme; example: `npx devhop https://localhost:8443`.
-- Generates compact Unicode terminal QR code for instant phone camera scanning.
-- Mobile inspector: `https://<tunnel>/__devhop/inspect` provides an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes without modifying the app HTML.
-- Agent-ready: `--json` prints one JSON event per line on stdout (`ready`, `reconnecting`, `error` with a stable `code`, `closed`) so coding agents can act on failures.
-- Corporate firewall bypass: `npx devhop [target] --http2` routes the tunnel over HTTP/2 (TCP 443) when UDP/QUIC is blocked.
-- Zero signup, zero accounts, zero cloud config, zero system daemons.
+- Upstream HTTPS accepts self-signed certificates on loopback. A wrong scheme returns `502` with a hint to retry using the matching URL scheme.
+- Prints a compact terminal QR code (`--no-qr` to skip).
+- Mobile inspector: `https://<tunnel>/__devhop/inspect` provides an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes.
+- Agent-ready: `--json` prints one JSON event per line on stdout (`ready` with `url`, `inspectUrl` and `edgeReady`; `reconnecting`; `error` with a stable `code`; `closed`) so coding agents can act on failures.
+- `npx devhop --doctor` (add `--json` for a `doctor` event) prints diagnostics to paste into bug reports.
+- Corporate firewall bypass: `--http2` routes the tunnel over HTTP/2 (TCP 443) when UDP/QUIC is blocked.
+- cloudflared is downloaded once, pinned and checked against a SHA-256; set `DEVHOP_CLOUDFLARED=/path/to/cloudflared` to use your own binary.
+- No account or signup.
+
+## Limits
+Quick tunnels are for testing: URLs are public and change every run, Server-Sent Events are not supported, and Cloudflare caps concurrent requests.

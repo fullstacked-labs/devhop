@@ -4,12 +4,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Built for AI Agents](https://img.shields.io/badge/AI%20Agent-Skill%20Ready-purple.svg)](./skills/devhop/SKILL.md)
+![smoke](https://github.com/fullstacked-labs/devhop/actions/workflows/smoke.yml/badge.svg)
 
-> **Hop your local web dev server onto your phone in seconds. Live updates as you edit code, real HTTPS for camera and microphone access, and zero configuration.**
+> **Your phone says "Blocked request. This host is not allowed." `npx devhop` fixes it.**
+
+Hot reload, real HTTPS (mic, camera, passkeys) and a QR code, with no config edits or accounts.
+
+```text
+Vite:     Blocked request. This host ("smoke-check.trycloudflare.com") is not allowed.
+Next.js:  Blocked cross-origin request to Next.js dev resource /_next/hmr from "smoke-check.trycloudflare.com".
+Safari:   TypeError: undefined is not an object (evaluating 'navigator.mediaDevices.getUserMedia')
+```
 
 ```bash
 npx devhop [port]
 ```
+
+![demo](docs/demo.gif)
 
 ```text
  🦘 DEVHOP 
@@ -26,103 +37,23 @@ npx devhop [port]
   Press Ctrl+C to stop the tunnel and disconnect.
 ```
 
----
+## Your agent built it. Now see it on your phone.
 
-## Why testing on your phone is so frustrating
+Ask your coding agent "show me this on my phone". It runs `npx devhop --json`, reads the URL from the first event, and hands it back. You scan it, and the page hot-reloads while the agent keeps editing.
 
-If you have ever tried opening your local Next.js, Vite, Remix, or Astro site on a real iPhone or Android phone, you have probably run into one of these headaches:
+The skill is at [`skills/devhop/SKILL.md`](./skills/devhop/SKILL.md), and the [JSON events](#json-events-for-agents-and-scripts) are below.
 
-### 1. Your phone doesn't update when you save code (or gets blocked completely)
-Normally, when you edit code on your laptop, your browser updates automatically without losing your place (often called Fast Refresh or Hot Reload).
+## Works with
 
-But if you try opening your dev server on your phone through normal tunnels or your local Wi-Fi IP, Next.js and Vite block the connection for security. You end up with a red error screen:
-```text
-Blocked cross-origin request to Next.js dev resource...
-To allow this host in development, add it to "allowedDevOrigins" in next.config.js
-```
-Or Vite shows:
-```text
-Blocked request. This host is not allowed.
-```
-Or Next.js Server Actions crash when submitting a form:
-```text
-Error: Invalid Server Actions request.
-```
-Editing config files or whitelisting temporary URLs breaks git branches, messes up your teammates, and stops working the moment you switch Wi-Fi networks.
+| Framework | Version tested | Page | Hot reload | Without devhop |
+| :--- | :--- | :---: | :---: | :--- |
+| Vite + React | Vite 8.3.5 | ✅ | ✅ | 403 `Blocked request. This host … is not allowed.` |
+| Next.js | 16.4.3 | ✅ | ✅ | page loads, but the hot-reload WebSocket never connects |
+| Nuxt | 4.6.2 | ✅ | ✅ | 403 `Blocked request. This host … is not allowed.` |
+| SvelteKit | 3.1.0 | ✅ | ✅ | 403 `Blocked request. This host … is not allowed.` |
+| Astro | 7.4.2 | ✅ | ✅ | 403 `Blocked request. This host … is not allowed.` |
 
-### 2. Your phone's camera, microphone, and voice dictation refuse to work
-Mobile Safari (iPhone) and Chrome (Android) have a strict security rule: **they refuse to turn on your microphone or camera unless the website has a real, trusted HTTPS padlock.**
-
-If you load your site using your Wi-Fi address (like `http://192.168.1.50:3000`), the phone treats it as an untrusted site:
-* `navigator.mediaDevices.getUserMedia` is `undefined`.
-* Speech-to-Text, voice dictation, and camera features crash instantly.
-* WebCrypto (token signing) and FaceID/TouchID (Passkeys) are disabled.
-
-Setting up self-signed certificates (`mkcert`) on an iPhone requires emailing certificate files to yourself, installing an iOS Configuration Profile, and digging through *Settings > General > About > Certificate Trust Settings*.
-
-### 3. Cafe and office Wi-Fi blocks your phone from seeing your laptop
-In coffee shops, airports, and offices, routers turn on "Client Isolation" for guest security. That means your phone and your laptop are forbidden from talking to each other directly, even on the same Wi-Fi.
-
----
-
-## How devhop makes it work
-
-`devhop` connects your phone to your laptop through an instant, outgoing tunnel and quietly adjusts the request labels along the way:
-
-```
-┌─────────────────┐       HTTPS       ┌─────────────────────────────┐
-│  iPhone Safari  │ ────────────────▶ │ *.trycloudflare.com (Edge)  │
-└─────────────────┘                   └─────────────────────────────┘
-                                                     │
-                                                     ▼ HTTP
-                                      ┌─────────────────────────────┐
-                                      │      devhop Micro-Proxy     │
-                                      │ (Makes it look like loopback)│
-                                      └─────────────────────────────┘
-                                                     │
-                                                     ▼ Localhost
-                                      ┌─────────────────────────────┐
-                                      │ Next.js / Vite (Port 3000)  │
-                                      └─────────────────────────────┘
-```
-
-1. **Instant trusted link**: Creates a temporary HTTPS link via Cloudflare's edge. Your phone sees a genuine, trusted security padlock.
-2. **Framework friendly**: Relabels incoming requests so Next.js and Vite think your phone is just a regular browser tab running directly on your laptop. No red error screens, no config editing.
-3. **Live updates on save**: Preserves the live WebSocket connection so your phone screen refreshes instantly when you save code.
-4. **Logins & cookies stay intact**: Rewrites redirect links and strips `localhost` cookie restrictions so login flows and session cookies work naturally on your phone.
-5. **Survives server restarts**: If Vite or Next.js reboots while you're working, `devhop` recovers automatically without dropping your tunnel or making you scan a new QR code.
-
----
-
-## Comparison: Why devhop feels different
-
-| Feature | **devhop** | **ngrok** | **unjs/untun** | **LocalCan** | **mkcert** |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Command** | `npx devhop` | Download CLI + login | `npx untun` | $57 Mac App | Brew install |
-| **Account or Signup?** | **None** | Required | None | License key | None |
-| **Real HTTPS Padlock?** | **Yes** | Yes | Yes | Yes (local only) | Manual iOS Profile |
-| **Live Updates on Save (Next/Vite)**| **Yes** | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Wi-Fi IP mismatch |
-| **Next.js Server Actions Safe?** | **Yes** | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Protocol mismatch |
-| **Vite 6+ `allowedHosts` Safe?** | **Yes** | ⚠️ 403 until host is allowed | ⚠️ 403 until host is allowed | ⚠️ 403 until host is allowed | ⚠️ Host mismatch |
-| **Terminal QR Code** | **Yes** (Compact) | ❌ Link only | ❌ Link only | ❌ App UI only | ❌ None |
-| **Price** | **100% Free (MIT)** | $8+/mo after 1GB | Free | $57 one-time | Free |
-
----
-
-## What features unlock on your phone?
-
-Because `devhop` provides a genuine HTTPS connection, modern mobile Web APIs work on your real device on the first try:
-
-| Feature | Using Wi-Fi IP (`http://192.168.x.x`) | Using `npx devhop` | What you can test |
-| :--- | :---: | :---: | :--- |
-| **Microphone (`getUserMedia`)** | ❌ Blocked | ✅ **Works** | Speech-to-Text dictation, voice notes, audio recorders |
-| **Camera (`getUserMedia`)** | ❌ Blocked | ✅ **Works** | QR/barcode scanning, photo uploads, video capture |
-| **FaceID / TouchID (Passkeys)** | ❌ Blocked | ✅ **Works** | Biometric login flows |
-| **WebCrypto (`crypto.subtle`)** | ❌ Blocked | ✅ **Works** | Client-side encryption and JWT auth tokens |
-| **1-Click Copy (`navigator.clipboard`)** | ❌ Blocked | ✅ **Works** | Copy-to-clipboard buttons |
-| **"Add to Home Screen" (PWA)** | ❌ Blocked | ✅ **Works** | Testing full-screen PWA installs on iOS |
-
----
+Checked nightly in CI; see the [smoke workflow](./.github/workflows/smoke.yml). "Without devhop" is the same request sent straight to the dev server with the tunnel's Host header.
 
 ## Quickstart
 
@@ -162,6 +93,28 @@ npx devhop --version         Show version
 npx devhop --doctor          Print diagnostics for bug reports
 ```
 
+### JSON events for agents and scripts
+
+`npx devhop 3000 --json` writes one JSON object per line to stdout:
+
+| `event` | When | Fields |
+| --- | --- | --- |
+| `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol`, `edgeReady` |
+| `reconnecting` | The tunnel is retrying | `attempt` |
+| `error` | Before exiting non-zero | `code`, `message` |
+| `closed` | After Ctrl+C or SIGTERM | none |
+| `doctor` | `npx devhop --doctor --json` | `devhop`, `node`, `platform`, `arch`, `cloudflared`, `devPorts`, `cacheDir` |
+
+`edgeReady` is `false` when Cloudflare hadn't answered after 20 seconds. The URL is still valid; reload after a few seconds.
+
+```json
+{"event":"ready","url":"https://example.trycloudflare.com","inspectUrl":"https://example.trycloudflare.com/__devhop/inspect","target":"http://127.0.0.1:3000","port":3000,"host":"127.0.0.1","protocol":"http:","edgeReady":true}
+{"event":"reconnecting","attempt":1}
+{"event":"error","code":"NO_DEV_SERVER","message":"No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000."}
+```
+
+Error codes: `INVALID_TARGET`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `UNCAUGHT`. Machine-readable summary: [`llms.txt`](./llms.txt).
+
 ### cloudflared
 
 On first run devhop downloads a pinned cloudflared release into `~/.cache/devhop/bin/<version>/` and checks its SHA-256 before using it. To use your own binary instead, set `DEVHOP_CLOUDFLARED=/path/to/cloudflared`; devhop then downloads nothing.
@@ -178,7 +131,65 @@ On office or cafe networks where UDP/QUIC is blocked, `cloudflared` may fail to 
 npx devhop 3000 --http2
 ```
 
-### Security & exposure
+## What unlocks on your phone
+
+Because the tunnel is genuine HTTPS, the Web APIs that need a secure context work on a real device:
+
+| Feature | Using Wi-Fi IP (`http://192.168.x.x`) | Using `npx devhop` | What you can test |
+| :--- | :---: | :---: | :--- |
+| **Microphone (`getUserMedia`)** | ❌ Blocked | ✅ **Works** | Speech-to-Text dictation, voice notes, audio recorders |
+| **Camera (`getUserMedia`)** | ❌ Blocked | ✅ **Works** | QR/barcode scanning, photo uploads, video capture |
+| **FaceID / TouchID (Passkeys)** | ❌ Blocked | ✅ **Works** | Biometric login flows |
+| **WebCrypto (`crypto.subtle`)** | ❌ Blocked | ✅ **Works** | Client-side encryption and JWT auth tokens |
+| **1-Click Copy (`navigator.clipboard`)** | ❌ Blocked | ✅ **Works** | Copy-to-clipboard buttons |
+| **"Add to Home Screen" (PWA)** | ❌ Blocked | ✅ **Works** | Testing full-screen PWA installs on iOS |
+
+## How it works
+
+```
+┌─────────────────┐       HTTPS       ┌─────────────────────────────┐
+│  iPhone Safari  │ ────────────────▶ │ *.trycloudflare.com (Edge)  │
+└─────────────────┘                   └─────────────────────────────┘
+                                                     │
+                                                     ▼ HTTP
+                                      ┌─────────────────────────────┐
+                                      │      devhop Micro-Proxy     │
+                                      │ (Makes it look like loopback)│
+                                      └─────────────────────────────┘
+                                                     │
+                                                     ▼ Localhost
+                                      ┌─────────────────────────────┐
+                                      │ Next.js / Vite (Port 3000)  │
+                                      └─────────────────────────────┘
+```
+
+1. **Instant trusted link**: Creates a temporary HTTPS link via Cloudflare's edge. Your phone sees a genuine, trusted security padlock.
+2. **Framework friendly**: Relabels incoming requests so Next.js and Vite think your phone is just a regular browser tab running directly on your laptop. No red error screens, no config editing.
+3. **Live updates on save**: Preserves the live WebSocket connection so your phone screen refreshes instantly when you save code.
+4. **Logins & cookies stay intact**: Rewrites redirect links and strips `localhost` cookie restrictions so login flows and session cookies work naturally on your phone.
+5. **Survives server restarts**: If Vite or Next.js reboots while you're working, `devhop` recovers automatically without dropping your tunnel or making you scan a new QR code.
+
+## Compared to
+
+| | **devhop** | **`cloudflared tunnel --url`** | **ngrok** | **unjs/untun** | **LocalCan** | **mkcert** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Command** | `npx devhop` | `cloudflared tunnel --url …` | CLI download + login | `npx untun` | Mac app | `brew install` |
+| **Account or signup** | None | None | Required | None | License key | None |
+| **Real HTTPS padlock** | Yes | Yes | Yes | Yes | Yes (local only) | Manual iOS profile |
+| **Hot reload in Vite, Next.js, Nuxt, SvelteKit, Astro** | Yes (nightly CI) | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` edits | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` edits | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` edits | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` edits | ⚠️ Wi-Fi IP mismatch |
+| **Terminal QR code** | Yes | Link only | Link only | Link only | App UI only | None |
+
+## FAQ
+
+**Why not just cloudflared?** `cloudflared tunnel --url http://localhost:3000` gets you a URL. Then Vite answers 403 `Blocked request. This host … is not allowed.` and Next.js refuses the hot-reload socket, because both check the Host and Origin headers. devhop runs cloudflared for you and rewrites those headers so the dev server sees localhost. The [table above](#works-with) shows what each framework does without it.
+
+**Is it safe?** The URL is public and anyone who has it can reach your dev server. See [Security & exposure](#security--exposure).
+
+**`navigator.mediaDevices` is still undefined.** The page must be a secure context in a real browser tab. It is also undefined in home-screen web apps and some in-app browsers, and old code may call the deprecated `navigator.getUserMedia`. Open the tunnel URL in Safari or Chrome directly.
+
+**Can I get a persistent URL?** Not on quick tunnels. Every run gets a new random subdomain.
+
+## Security & exposure
 
 Read this before running devhop:
 
@@ -186,7 +197,7 @@ Read this before running devhop:
 - **Header masquerading is intentional.** devhop rewrites `Host`, `Origin`, and `Referer` so your dev server treats the phone as trusted loopback — which also means dev-mode origin and CSRF protections (Next.js `allowedDevOrigins`, Vite `allowedHosts`) are bypassed for everyone, not just your phone.
 - Run only dev servers you're actively working on. Never point devhop at anything containing real credentials or user data.
 
-### Limitations
+## Limitations
 
 devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudflare explicitly labels *testing and development only*:
 
@@ -194,34 +205,10 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
 - **200 concurrent in-flight requests.** Heavy HMR bursts or many simultaneous devices can hit Cloudflare's request cap and return `429`.
 - **Ephemeral URLs.** Every run gets a new random subdomain; there is no custom-domain option on free quick tunnels.
 - **No SLA.** Cloudflare can rate-limit or change the free quick-tunnel service at any time. If first-run setup fails intermittently, devhop retries once automatically before giving up.
-
----
-
-## AI Agent Integration
-
-`devhop` is designed so AI coding assistants (Claude Code, Cursor, Windsurf, OMP) can launch and manage mobile previews for you:
-* **[`skills/devhop/SKILL.md`](./skills/devhop/SKILL.md)**: an [Agent Skills](https://agentskills.io) skill, so coding agents know when and how to put your app on a phone.
-* **`llms.txt`**: Machine-readable reference for LLM tools.
-* **`--json` Flag**: Run `npx devhop 3000 --json` and read stdout, which carries one JSON object per line:
-
-  | `event` | When | Fields |
-  | --- | --- | --- |
-  | `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol`, `edgeReady` (`false` if Cloudflare hadn't answered after 20 s) |
-  | `reconnecting` | The tunnel is retrying | `attempt` |
-  | `error` | Before exiting non-zero | `code`, `message` |
-  | `closed` | After Ctrl+C or SIGTERM | none |
-  | `doctor` | `npx devhop --doctor --json` | the diagnostics fields: `devhop`, `node`, `platform`, `arch`, `cloudflared`, `devPorts`, `cacheDir` |
-
-  ```json
-  {"event":"ready","url":"https://example.trycloudflare.com","inspectUrl":"https://example.trycloudflare.com/__devhop/inspect","target":"http://127.0.0.1:3000","port":3000,"host":"127.0.0.1","protocol":"http:"}
-  {"event":"reconnecting","attempt":1}
-  {"event":"error","code":"NO_DEV_SERVER","message":"No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000."}
-  ```
-
-  Error codes: `INVALID_TARGET`, `INVALID_GATEWAY_URL`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `GATEWAY_FAILED`, `UNCAUGHT`.
-
----
+- **Blocked domains.** Some corporate networks and security tools block `*.trycloudflare.com`, because free tunnel domains get abused for phishing. If the phone shows a block page, try cellular.
 
 ## License
 
 MIT © [Noor Latif](https://github.com/noor-latif) · [Fullstacked](https://fullstacked.se)
+
+More tools from [Fullstacked Labs](https://github.com/fullstacked-labs).
