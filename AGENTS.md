@@ -9,13 +9,21 @@ that rewrites Host/Origin/Referer so dev servers treat the phone as localhost.
 - `bin/devhop.js`: entry point; calls `run()` in `src/cli.js`.
 - `src/cli.js`: argument parsing, dashboard, lifecycle and cleanup.
 - `src/proxy.js`: the masquerade proxy (stdlib `http`/`https`/`net`/`tls` only).
-- `src/tunnel.js`: downloads, caches and runs `cloudflared`.
+- `src/tunnel.js`: caches and runs `cloudflared`.
+- `src/cloudflared.js`: downloads the pinned cloudflared release and checks
+  its SHA-256. Bump the pin with `node scripts/bump-cloudflared.js [version]`.
+- `src/doctor.js`: `--doctor` diagnostics.
 - `src/port.js`: target parsing and dev-port detection.
 - `src/gateway/`: experimental self-hosted relay transport (`--gateway`).
   Hidden from `--help` and the README on purpose; keep it that way until the
   relay ships as a supported feature.
 - `test/`: `node:test` suites; `npm test` runs everything under it.
-- `skills/devhop/SKILL.md`, `llms.txt`: docs for coding agents. Keep them in sync with the CLI.
+- `smoke/`: framework smoke matrix (`node smoke/run.js <fixture>`) and the
+  real-tunnel canary; see `smoke/README.md`. Not part of `npm test`.
+- `scripts/`: release helpers (`release-notes.js`, `bump-cloudflared.js`).
+- `skills/devhop/SKILL.md`, `llms.txt`: docs for coding agents. Keep them in
+  sync with the CLI. The `--json` events and error codes are public API: add
+  fields, don't rename or remove them.
 
 ## Commands
 
@@ -28,8 +36,9 @@ node bin/devhop.js 3000 --json    # real tunnel; needs network
 ## Rules
 
 - Node ≥ 20, ESM, `node:` imports, 2-space indent, single quotes.
-- Runtime dependencies stay at three (`cloudflared`, `picocolors`,
-  `qrcode-terminal`). Adding one needs a reason the stdlib can't cover.
+- Runtime dependencies stay at two (`picocolors`, `qrcode-terminal`).
+  Adding one needs a reason the stdlib can't cover, and no dependency may
+  have an install script.
 - Tests bind port 0 or `findFreePort()`, never a fixed port.
 - Conventional Commits (`feat(cli): …`, `fix(proxy): …`), one logical change
   per commit. No AI attribution trailers.
@@ -63,3 +72,6 @@ devhop has to read as written by someone who cares. Specifically:
   listens to both or a half-closed peer leaks a binding.
 - `src/tunnel.js` retries quick-tunnel creation once: first-run failures are
   common and transient.
+- `smoke/run.js` fails a fixture whose direct checks both pass. That is the
+  control: if the framework works without devhop, the README claim is false.
+  Drop the framework from the claims instead of loosening the verdict.
