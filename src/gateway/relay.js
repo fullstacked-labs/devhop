@@ -1,18 +1,12 @@
-// Gateway relay — GATEWAY_DESIGN.md §1-§8. Loopback HTTP server that accepts
-// client WSS upgrades (RFC 6455 server handshake hand-rolled, zero deps) and
-// ingress HTTP connections routed by Host (R7), then pumps bytes both ways
-// (L4, no parsing). Each WS binary message = exactly one codec frame
-// (src/gateway/frames.js); the length prefix inside the frame lets the
-// decoder reassemble across TCP chunk boundaries — see slice-1 note.
+// Gateway relay. Loopback HTTP server that accepts client WSS upgrades (RFC
+// 6455 server handshake hand-rolled, no deps) and ingress HTTP connections
+// routed by Host, then pumps bytes both ways without parsing them. Each WS
+// binary message is exactly one codec frame (src/gateway/frames.js).
 //
-// Deviations kept visible (AMBIGUITY list in the slice-2 report):
 // - PING/backoff/idle timers are constructor options so tests run fast.
-// - R5 backpressure (per-stream pause at 1 MiB) is NOT implemented here —
-//   the pump uses socket pause/resume on one aggregate highWaterMark instead;
-//   per-stream accounting lands with the client slice when stream objects
-//   gain their real shape.
-// - Parking (§7) holds the ingress socket open during the 30 s grace window;
-//   the 10 s discard applies only to conns that arrive with no binding or a
+// - Backpressure uses one aggregate high-water mark with socket pause/resume.
+// - A binding in its 30 s grace window parks incoming ingress sockets; the
+//   10 s discard applies only to sockets that arrive with no binding or a
 //   fully expired one.
 
 import { createHash } from 'node:crypto';
@@ -35,7 +29,7 @@ const REGISTER_ERR_CODES = {
 };
 
 // Encode a server→client WS message: no mask (server frames are unmasked),
-// length per RFC 6455 §5.2.
+// length per RFC 6455 section 5.2.
 function wsEncode(opcode, payload) {
   const len = payload.length;
   let header;
@@ -56,7 +50,7 @@ function wsEncode(opcode, payload) {
 }
 
 // Parse one client WS message from buf at off. Client frames are masked
-// (RFC 6455 §5.3). Returns {opcode, payload, next} or null if incomplete;
+// (RFC 6455 section 5.3). Returns {opcode, payload, next} or null if incomplete;
 // throws on a masked-less client frame (protocol error).
 function wsParse(buf, off) {
   if (buf.length - off < 2) return null;
@@ -105,18 +99,18 @@ export class Relay {
     // All durations in ms, overridable so tests don't wait real seconds.
     this.#timers = {
       pingInterval: 20_000,
-      pingTimeout: 40_000, // 2 missed pings → teardown (R2)
+      pingTimeout: 40_000, // 2 missed pings → teardown
       grace: 30_000,
       ingressDiscard: 10_000,
       ingressIdle: 60_000,
       ...timers,
     };
-    // Governor ceiling = 80% of the fd budget (§6b).
+    // Leave headroom below the fd limit so accepts fail cleanly, not with EMFILE.
     this.governorCeiling = Math.floor(maxFds * 0.8);
     this.#opts = { maxFds };
     this.#httpServer = http.createServer((req, res) => this.#handleHttp(req, res));
-    // Governor counter (§6b): every live TCP conn counts — client WS upgrades
-    // and ingress HTTP alike — so the ceiling is a real fd/socket budget.
+    // Every live TCP conn counts, client WS upgrades and ingress HTTP alike,
+    // so the ceiling is a real fd/socket budget.
     this.#httpServer.on('connection', (sock) => {
       this.#sockets++;
       sock.on('close', () => this.#sockets--);
@@ -158,10 +152,10 @@ export class Relay {
     };
   }
 
-  // Plain-HTTP side: /health (R9). Ingress is ALSO served here but as a raw
-  // byte pipe: once Host routing picks a binding (R7, one header read), the
-  // socket is detached from Node's HTTP parser and pumped verbatim — L4, no
-  // request/response semantics anywhere (§2 option (a)).
+  // Plain-HTTP side: /health. Ingress is also served here, but as a raw byte
+  // pipe: once Host routing picks a binding, the socket is detached from
+  // Node's HTTP parser and pumped verbatim, so the relay never interprets
+  // request or response semantics (SSE passes through untouched).
   #handleHttp(req, res) {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -181,7 +175,7 @@ export class Relay {
   #handleUpgrade(req, socket, head) {
     const key = req.headers['sec-websocket-key'];
     if (req.url.startsWith('/_gateway/register') && key) {
-      // RFC 6455 §4.2.2 accept: SHA-1(key + GUID), base64.
+      // RFC 6455 section 4.2.2 accept: SHA-1(key + GUID), base64.
       const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
       socket.write(
         'HTTP/1.1 101 Switching Protocols\r\n' +
@@ -200,8 +194,8 @@ export class Relay {
   // --- client (tunnel) side ---
 
   #serveClient(socket, remoteIp, head = Buffer.alloc(0)) {
-    // Version enforcement is the relay's job (prescriptive REGISTER_ERR per
-    // R8), so the decoder's own check is off here.
+    // Version enforcement is the relay's job (the REGISTER_ERR tells the
+    // client how to upgrade), so the decoder's own check is off here.
     const dec = new FrameDecoder({ validateVersion: false });
     let lastPong = Date.now();
 
@@ -214,7 +208,7 @@ export class Relay {
     const cleanup = () => {
       if (binding.cleaned) return;
       binding.cleaned = true;
-      // R3: binding enters grace; parked/discarded per §7. Streams die now.
+      // The binding enters its grace window; streams die now.
       if (binding.registered && binding.sub) {
         binding.graceUntil = Date.now() + this.#timers.grace;
         for (const sock of binding.streams.values()) {
@@ -228,12 +222,12 @@ export class Relay {
       }
     };
     // Client teardown surfaces as 'close' (destroy/RST) or 'end' (FIN) on an
-    // upgraded socket — both mean the same thing for the binding (R3).
+    // upgraded socket — both mean the same thing for the binding.
     socket.on('close', cleanup);
     socket.on('end', cleanup);
     socket.on('error', cleanup);
 
-    // Watchdog: 2 consecutive missed PINGs → hard teardown (R2).
+    // Watchdog: 2 consecutive missed PINGs → hard teardown.
     const watchdog = setInterval(() => {
       if (Date.now() - lastPong > this.#timers.pingTimeout) socket.destroy();
     }, this.#timers.pingTimeout);
@@ -261,7 +255,7 @@ export class Relay {
           }
         }
       } catch (err) {
-        // Codec/WS protocol error → tear down (§2 fail-fast).
+        // A desynced peer can't be resynchronized, so tear down.
         socket.destroy();
       }
     });
@@ -274,7 +268,7 @@ export class Relay {
       return;
     }
     if (!binding.registered) {
-      binding.socket.destroy(); // no REGISTER → no session (R6)
+      binding.socket.destroy(); // nothing is allocated before REGISTER
       return;
     }
     if (type === FRAME.DATA) {
@@ -299,17 +293,16 @@ export class Relay {
       body.writeUInt16BE(Buffer.byteLength(msg), 1);
       body.write(msg, 3);
       binding.send(encodeFrame(FRAME.REGISTER_ERR, body));
-      binding.socket.end(); // server closes after REGISTER_ERR (§6)
+      binding.socket.end();
     };
 
-    // Governor (§6b): ceiling is a socket budget — reject NEW tunnels while
-    // live sockets are at/over the ceiling, never kill existing.
+    // Reject new tunnels at the ceiling; existing ones keep serving.
     if (this.#sockets >= this.governorCeiling && !binding.graceUntil) {
       respondErr(REGISTER_ERR_CODES.GOVERNOR, 'gateway at connection limit; try again shortly');
       return;
     }
 
-    // payload: version:u8, tokenLen:u16, token, subLen:u8, sub* (§2)
+    // payload: version:u8, tokenLen:u16, token
     if (payload.length < 1 || payload[0] !== PROTOCOL_VERSION) {
       const v = payload[0] ?? '?';
       respondErr(
@@ -324,14 +317,14 @@ export class Relay {
     }
     const tokenLen = payload.readUInt16BE(1);
     let token = payload.subarray(3, 3 + tokenLen).toString('utf8');
-    // R6/R12 tokenless tier: the client mints a per-process nonce
-    // (client.js), so hash(token+salt) is stable across reconnects — §7
-    // reclaim and R10 hold for the default zero-config mode. This fallback
-    // branch only catches bare/old clients sending a genuinely empty token;
-    // each such connect mints a fresh sub.
+    // The client mints a per-process nonce when it has no token (client.js),
+    // so hash(token+salt) is stable across reconnects and reclaim works in
+    // zero-config mode. This fallback only catches clients sending a truly
+    // empty token; each such connect mints a fresh sub.
     if (!token) token = crypto.randomBytes(16).toString('hex');
-    // R4: a new REGISTER from the same token force-closes the old socket.
-    // §7: parked ingress conns must survive the reclaim — hand them over.
+    // A new REGISTER from the same token force-closes the old socket first, so
+    // two live sockets never share a binding. Parked ingress conns must
+    // survive the reclaim, so they are handed over.
     let parkedConns = [];
     for (const [sub, other] of this.#bindings) {
       if (other.token === token && other !== binding) {
@@ -341,7 +334,7 @@ export class Relay {
       }
     }
 
-    // Per-IP tunnel cap (§6): count live (non-grace) bindings for this IP.
+    // Per-IP tunnel cap: count live (non-grace) bindings for this IP.
     const ipCount = [...this.#bindings.values()].filter((b) => b.ip === remoteIp && b.graceUntil === null).length;
     if (ipCount >= this.#limits.maxTunnelsPerIp && !binding.graceUntil) {
       respondErr(
@@ -351,9 +344,8 @@ export class Relay {
       return;
     }
 
-    // Subdomain derivation (R10): hash → 6 hex chars; collision with a
-    // DIFFERENT token → deterministic 2-char suffix from R7's [a-z0-9]
-    // charset (base-36 over the attempt number).
+    // Subdomain derivation: hash → 6 hex chars; collision with a different
+    // token → 2-char [a-z0-9] suffix (base-36 over the attempt number).
     let sub = subFromToken(token, this.salt);
     if (this.#bindings.has(sub) && this.#bindings.get(sub).token !== token) {
       let suffix = 0;
@@ -371,8 +363,8 @@ export class Relay {
       }
     }
 
-    // Reclaim within grace (§7): any prior binding under this sub was either
-    // force-closed in the R4 loop above (parked conns handed over) or never
+    // Reclaim within grace: any prior binding under this sub was either
+    // force-closed in the loop above (parked conns handed over) or never
     // existed — the table now only holds bindings for other tokens.
     const okBody = Buffer.alloc(1 + sub.length);
     okBody[0] = sub.length;
@@ -412,7 +404,7 @@ export class Relay {
     const head = this.#rawHead(req);
 
     if (!binding || binding.graceUntil !== null) {
-      // §5: relay answers, never Caddy. Park if within grace, else 503 now.
+      // The relay answers itself rather than letting the proxy in front emit a 502. Park if within grace, else 503 now.
       if (binding && Date.now() < binding.graceUntil) {
         const parked = { socket, head, discarded: false };
         binding.parked.push(parked);
@@ -440,8 +432,8 @@ export class Relay {
     }
   }
 
-  // Reconstruct the request head verbatim (§2 option (a): OPEN carries the
-  // head; no parsing beyond what Node already did for routing).
+  // Reconstruct the request head verbatim: OPEN carries it, and nothing is
+  // parsed beyond what Node already did for routing.
   #rawHead(req) {
     const lines = [`${req.method} ${req.url} HTTP/1.1`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
@@ -451,7 +443,7 @@ export class Relay {
   }
 
   #admitIngress(binding, socket, head, sub) {
-    // Stream cap (§6): refused streams get a clean 503.
+    // Nothing exists to CLOSE yet, so a refused stream gets a clean 503.
     if (binding.streams.size >= this.#limits.maxStreamsPerTunnel) {
       const msg = `devhop gateway: tunnel ${sub} has too many concurrent streams`;
       socket.write(`HTTP/1.1 503 Service Unavailable\r\nContent-Length: ${Buffer.byteLength(msg)}\r\n\r\n${msg}`);
@@ -467,9 +459,8 @@ export class Relay {
       if (binding.streams.get(streamId) === socket) binding.streams.delete(streamId);
     };
 
-    // §6b ingress read-idle timer: silence for ingressIdle ms → reap. The
-    // phone sees a normal close; no FD leak. destroy() fires the connection
-    // 'close' hook, dropping the governor count.
+    // Reap sockets that go silent, so half-open peers can't exhaust fds.
+    // destroy() fires the connection 'close' hook, dropping the governor count.
     const idleTimer = setTimeout(() => {
       socket.destroy();
       finish();
@@ -485,7 +476,6 @@ export class Relay {
     socket.on('error', finish);
     socket.on('close', finish);
 
-    // OPEN carries the request head verbatim (§2, decision 1).
     binding.send(encodeFrame(FRAME.OPEN, head, streamId));
   }
 

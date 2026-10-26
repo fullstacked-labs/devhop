@@ -24,11 +24,11 @@ describe('gateway frame codec', () => {
       for (const [label, make] of sizes) {
         it(`${label} of 0x${type.toString(16)}`, () => {
           let payload = make();
-          // REGISTER's payload always starts with the version byte (R8).
+          // REGISTER's payload always starts with the version byte (protocol version).
           if (type === FRAME.REGISTER) {
             payload = Buffer.concat([Buffer.from([PROTOCOL_VERSION]), payload.subarray(0, MAX_PAYLOAD - 1)]);
           }
-          // PING/PONG/REGISTER-family use streamId 0 (§2); others carry an id.
+          // PING/PONG/REGISTER-family use streamId 0; others carry an id.
           const streamId = type === FRAME.OPEN || type === FRAME.DATA || type === FRAME.CLOSE ? 7 : 0;
           const frames = decodeFrames(encodeFrame(type, payload, streamId));
           assert.equal(frames.length, 1);

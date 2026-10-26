@@ -1,4 +1,4 @@
-// §9 test 3 — cable-pull harness (shipping gate).
+// Cable-pull harness: kills the client's WSS socket mid-stream and checks the seam.
 // Mid-stream: open a phone request against a slow-streaming dev server, then
 // SIGKILL-style destroy the client's WSS socket. Assert: reclaim within the
 // grace window + headroom, at most ONE clean error response for the killed
@@ -91,7 +91,7 @@ function countChunks(body) {
   return { complete: true, ordered: idx.every((v, i) => i === 0 || v > idx[i - 1]) };
 }
 
-describe('§9 test 3: cable-pull', () => {
+describe('cable-pull', () => {
   it('reclaims within grace, ≤1 error response, body intact, parked conn never hangs, no state leak', { timeout: 15_000 }, async () => {
     const relay = new Relay({ port: 0, salt: SALT, timers: { grace: GRACE_MS, ingressDiscard: 400 } });
     const { server: devServer, port: devPort } = await startSlowDev();

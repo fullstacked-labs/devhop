@@ -1,16 +1,15 @@
-// Gateway frame codec — GATEWAY_DESIGN.md §2. Pure module: no I/O, no deps.
+// Gateway frame codec. Pure module: no I/O, no deps.
 //
 // Wire layout per frame (9-byte header + payload):
 //   [type: u8][len: u32 BE][streamId: u32 BE][payload: len bytes]
-// AMBIGUITY: §2's table has no length field (each WS message is one frame),
-// but a decoder must reassemble frames split across byte-stream chunks, which
-// needs an explicit length. Added as u32 BE right after type.
+// Each WS message carries one frame, but a decoder must also reassemble frames
+// split across byte-stream chunks, which needs an explicit length.
 //
-// Max payload is 256 KiB. §2 scopes it to DATA; we enforce it on every frame
-// so a hostile peer can't hand us an unbounded PING either.
+// Max payload is 256 KiB, enforced on every frame type so a hostile peer can't
+// hand us an unbounded PING either.
 //
-// R8: the protocol version byte is the first byte of the REGISTER payload,
-// not a per-frame field. Decoder rejects a REGISTER whose version ≠ 1.
+// The protocol version byte is the first byte of the REGISTER payload, not a
+// per-frame field. Decoder rejects a REGISTER whose version ≠ 1.
 
 export const PROTOCOL_VERSION = 1;
 
@@ -59,7 +58,7 @@ export function encodeFrame(type, payload = Buffer.alloc(0), streamId = 0) {
 
 // Parse one header+payload out of `buf` at `off`. Returns the frame and the
 // next offset, or null if the buffer doesn't hold the whole frame yet.
-// Throws (fail fast, §2: unknown type on receive → tear down) on unknown
+// Throws (fail fast: an unknown type means the peer is desynced) on unknown
 // types and oversized lengths even before the full payload has arrived.
 function parseFrame(buf, off, validateVersion = true) {
   // Validate incrementally: type as soon as byte 0 is here, length as soon as
@@ -105,14 +104,14 @@ export function decodeFrames(buffer) {
 // Incremental decoder: feed() takes arbitrary chunk boundaries and returns
 // every frame that has become complete. end() rejects a stream that stops
 // mid-frame. After any throw the decoder is unusable — the peer is desynced
-// and the connection must be torn down (§2), never resynchronized.
+// and the connection must be torn down, never resynchronized.
 export class FrameDecoder {
   #carry = Buffer.alloc(0);
   #dead = false;
   #validateVersion = true;
 
   // validateVersion: false lets the relay own the REGISTER_ERR reply for bad
-  // versions (R8's prescriptive message); the default keeps the codec strict
+  // versions with a message that says how to upgrade; the default keeps the codec strict
   // for any consumer that just wants fail-fast parsing.
   constructor({ validateVersion = true } = {}) {
     this.#validateVersion = validateVersion;

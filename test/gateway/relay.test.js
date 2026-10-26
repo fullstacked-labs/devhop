@@ -1,6 +1,6 @@
-// Integration tests for the gateway relay (§9 test plan 2, 5, 6).
+// Integration tests for the gateway relay.
 // The mock client speaks the real codec over hand-rolled WS frames,
-// mirroring what src/gateway.js will do in the client slice.
+// mirroring what src/gateway/client.js does.
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -277,7 +277,7 @@ describe('relay REGISTER', () => {
     a2.destroy();
   });
 
-  it('accepts a tokenless register (R6/R12) and round-trips', async () => {
+  it('accepts a tokenless register and round-trips', async () => {
     const c = new MockClient();
     await c.connect(port);
     // tokenLen 0: version byte + u16 zero length, no token bytes.

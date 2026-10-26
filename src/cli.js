@@ -49,7 +49,7 @@ export async function run(args = []) {
   let gatewayUrl = null;
   if (gatewayIdx !== -1) {
     gatewayUrl = args[gatewayIdx].startsWith('--gateway=') ? args[gatewayIdx].slice(10) : args[gatewayIdx + 1];
-    // R12: --gateway <url> — ws:// for local/test relays, wss:// for prod.
+    // ws:// is for local/test relays, wss:// for real ones.
     if (!gatewayUrl || gatewayUrl.startsWith('-') || !/^wss?:\/\//.test(gatewayUrl)) {
       console.error(pc.red(`\nInvalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.`));
       console.error(`Example: ${pc.cyan('devhop --gateway wss://devhop.se')}\n`);
@@ -101,7 +101,7 @@ export async function run(args = []) {
 
   if (!isJson) console.log(`\n${pc.cyan('●')} Initializing ${pc.bold('devhop')} for port ${pc.bold(targetPort)}...`);
 
-  // R12: no cloudflared download in gateway mode.
+  // Gateway mode doesn't use cloudflared, so skip the download.
   const binPath = gatewayUrl
     ? null
     : await ensureBinary((msg) => {

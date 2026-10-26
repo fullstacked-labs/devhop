@@ -1,4 +1,4 @@
-// Integration tests for the gateway client (§9 test plan, client slice).
+// Integration tests for the gateway client.
 // Runs against the REAL relay (Relay on port 0) + a plain http mock dev
 // server standing in for the masquerade proxy. Mirrors relay.test.js.
 
@@ -24,7 +24,7 @@ function startRelay(timers = {}) {
   });
 }
 
-// Phone-side request through the relay's ingress (Host routing, R7).
+// Phone-side request through the relay's ingress (Host routing).
 function requestWithHost(port, host, path = '/') {
   return new Promise((resolve, reject) => {
     const req = http.request({ port, host: '127.0.0.1', path, agent: false, headers: { host } }, (res) => {
@@ -49,7 +49,7 @@ function mockDevServer(handler) {
 
 let relay, relayPort;
 
-// Unmask-position parser for one client WS frame (RFC 6455 §5.3); the fake
+// Unmask-position parser for one client WS frame (RFC 6455 section 5.3); the fake
 // gateway only needs frame boundaries, not the payload.
 function wsParseMasked(buf, off) {
   if (buf.length - off < 2) return null;
@@ -140,7 +140,7 @@ describe('gateway client REGISTER', () => {
           body.writeUInt16BE(msgText.length, 1);
           body.write(msgText, 3);
           socket.write(wsPlain(0x2, encodeFrame(FRAME.REGISTER_ERR, body)));
-          socket.end(); // server closes after REGISTER_ERR (§6)
+          socket.end(); // server closes after REGISTER_ERR
         }
       });
     });
@@ -192,7 +192,7 @@ describe('gateway client end-to-end', () => {
     const retries = [];
     const { server: devServer, port: devPort } = await mockDevServer();
     // backoffBaseMs > grace: the reconnect cannot beat the 300ms grace, so
-    // the phone deterministically hits the relay's 503 (§5) in the gap.
+    // the phone deterministically hits the relay's 503 in the gap.
     const gw = startGateway({
       localPort: devPort,
       gatewayUrl: `ws://127.0.0.1:${relayPort}`,
@@ -209,7 +209,7 @@ describe('gateway client end-to-end', () => {
     clientSockets.splice(0).forEach((s) => s.destroy());
 
     // Client notices, backs off (base 500ms > the 300ms grace), then reclaims.
-    // In the gap the binding expires → the phone gets the relay's 503 (§5).
+    // In the gap the binding expires → the phone gets the relay's 503.
     // Poll: the exact moment the relay authoring the 503 (vs the reclaim
     // racing ahead) is timing-dependent — catch it at least once.
     let saw503 = false;
@@ -220,7 +220,7 @@ describe('gateway client end-to-end', () => {
     }
     assert.ok(saw503, 'phone saw the relay 503 while the tunnel was down');
 
-    // After reclaim: success, same URL, onUrl NOT re-fired (§4/R10).
+    // After reclaim: success, same URL, onUrl NOT re-fired.
     await new Promise((r) => setTimeout(r, 1200));
     const res2 = await requestWithHost(relayPort, `${subFor('recon')}.devhop.se`);
     assert.equal(res2.status, 200);
@@ -274,7 +274,7 @@ describe('gateway client end-to-end', () => {
     assert.equal(relay.health.tunnels, 0, 'binding gone (tunnel not live)');
   });
 
-  it('tokenless mode: reconnect keeps the same sub (§7/R10 via client session nonce)', async () => {
+  it('tokenless mode: reconnect keeps the same sub (via client session nonce)', async () => {
     const urls = [];
     const { server: devServer, port: devPort } = await mockDevServer();
     // Fast backoff: the client reclaims well inside the 300ms grace.
@@ -296,7 +296,7 @@ describe('gateway client end-to-end', () => {
 
     // Kill the relay-side socket mid-active; client must reclaim the SAME
     // sub — its session nonce (minted once per startGateway call) is the
-    // token the relay hashes, so R10 URL stability holds without a token.
+    // token the relay hashes, so the URL stays stable without a token.
     clientSockets.splice(0).forEach((s) => s.destroy());
     await new Promise((r) => setTimeout(r, 600));
 

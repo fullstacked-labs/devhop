@@ -1,11 +1,11 @@
-// Gateway client — GATEWAY_DESIGN.md §1/§4. Dial the relay at
+// Gateway client. Dial the relay at
 // /_gateway/register, REGISTER, then pump streams: OPEN → net.connect to the
 // local masquerade-proxy port, bytes both ways as DATA frames, half-close
 // discipline on CLOSE. The WS layer is hand-rolled over http(s).request,
-// mirroring relay.js's server side: client frames are MASKED (RFC 6455 §5.3),
-// server frames must be unmasked. Zero deps.
+// mirroring relay.js's server side: client frames are MASKED (RFC 6455 section
+// 5.3), server frames must be unmasked. No deps.
 //
-// State machine (§4): CONNECTING → REGISTERING → ACTIVE; any socket death →
+// State machine: CONNECTING → REGISTERING → ACTIVE; any socket death →
 // reconnect with exponential backoff (base 500ms → cap 15s, ±50% full jitter,
 // reset after >60s stable); DEAD only on 10 consecutive failed dials, a fatal
 // REGISTER_ERR (bad token / version / banned), or manual close.
@@ -26,18 +26,18 @@ const WS_PONG = 0xa;
 const BACKOFF_BASE = 500;
 const BACKOFF_CAP = 15000;
 
-// §4 backoff: exponential from base, capped, ±50% full jitter. Pure + exported
+// Backoff: exponential from base, capped, ±50% full jitter. Pure + exported
 // so tests can assert the sequence directly.
 export function backoffDelay(n, baseMs = BACKOFF_BASE, capMs = BACKOFF_CAP, rand = Math.random) {
   const exp = Math.min(capMs, baseMs * 2 ** (n - 1));
   return Math.round(exp * (0.5 + rand()));
 }
-const STABLE_RESET = 60_000; // >60s stable → backoff resets to base (§4)
-const MAX_ATTEMPTS = 10; // consecutive failed dials → DEAD (§4)
-const HIGH_WATER = 1024 * 1024; // R5 per-stream backpressure mark
-const MAX_CHUNK = 256 * 1024; // §2 DATA frame cap
+const STABLE_RESET = 60_000; // >60s stable → backoff resets to base
+const MAX_ATTEMPTS = 10; // consecutive failed dials → DEAD
+const HIGH_WATER = 1024 * 1024; // pause/queue threshold for the shared WSS and local sockets
+const MAX_CHUNK = 256 * 1024; // matches the codec's frame cap
 
-// Client→server WS message: always masked (RFC 6455 §5.3).
+// Client→server WS message: always masked (RFC 6455 section 5.3).
 function wsEncodeMasked(opcode, payload) {
   const mask = crypto.randomBytes(4);
   const len = payload.length;
@@ -89,7 +89,7 @@ export function startGateway({
   gatewayUrl,
   token = '',
   urlTemplate = 'https://<sub>.devhop.se',
-  backoffBaseMs = BACKOFF_BASE, // test hook; prod backoff is §4-fixed
+  backoffBaseMs = BACKOFF_BASE, // test hook; production uses the default
   onUrl,
   onError,
   onClose,
@@ -101,9 +101,9 @@ export function startGateway({
     throw new Error(`unsupported gateway URL "${gatewayUrl}" — expected ws:// or wss://`);
   }
 
-  // Tokenless tier (R10/R12): a per-process nonce stands in for the token,
-  // so hash(token+salt) is stable across reconnects — §7 reclaim keeps the
-  // same sub and the URL survives laptop sleep/wake without any user token.
+  // Tokenless mode: a per-process nonce stands in for the token, so the relay
+  // derives the same sub across reconnects and the URL survives laptop
+  // sleep/wake without any user token.
   const sessionToken = token || crypto.randomBytes(16).toString('hex');
 
   let socket = null;
@@ -151,7 +151,7 @@ export function startGateway({
     activeSince = 0;
   }
 
-  // Any socket death / failed dial / transient REGISTER_ERR → reconnect (§4)
+  // Any socket death / failed dial / transient REGISTER_ERR → reconnect
   // unless this was the MAX_ATTEMPTS-th consecutive failure.
   function fail(err) {
     if (closed || dead || tearingDown) return;
@@ -182,7 +182,7 @@ export function startGateway({
     carry = Buffer.alloc(0);
     decoder = new FrameDecoder();
     const key = crypto.randomBytes(16).toString('base64');
-    // R11: no tls options passed — Node's default certificate verification.
+    // No tls options on purpose: Node's default certificate verification applies.
     const mod = tls ? https : http;
     req = mod.request({
       host: url.hostname,
@@ -212,7 +212,6 @@ export function startGateway({
         for (const st of streams.values()) st.socket.resume();
       });
       if (head.length) onWsData(head);
-      // R6: REGISTER before anything else — first message on every connect.
       sendFrameWs(FRAME.REGISTER, registerPayload());
     });
     req.on('response', (res) => fail(new Error(`gateway handshake failed: HTTP ${res.statusCode}`)));
@@ -220,14 +219,10 @@ export function startGateway({
     req.end();
   }
 
-  // §2 REGISTER payload as THIS relay parses it: version:u8, tokenLen:u16,
-  // token. ponytail: the §2 table's trailing subLen:u8 is NOT sent — the
-  // relay reads token at offset 3 and would swallow the 0x00 as the first
-  // token byte, corrupting every non-empty registration. Re-add subLen in
-  // the same commit that teaches the relay to parse it (R8 version bump).
-  // Tokenless mode: token is a per-process nonce, so hash(token+salt) is
-  // stable across reconnects — §7 reclaim and R10's URL-stability promise
-  // hold for the default zero-config mode.
+  // REGISTER payload as the relay parses it: version:u8, tokenLen:u16, token.
+  // A trailing subLen:u8 is not sent: the relay reads the token from offset 3
+  // and would swallow it as a token byte. Add it in the same commit that
+  // teaches the relay to parse it, with a protocol version bump.
   function registerPayload() {
     const tok = Buffer.from(sessionToken, 'utf8');
     const p = Buffer.alloc(3);
@@ -244,9 +239,9 @@ export function startGateway({
         if (!msg) break;
         carry = Buffer.from(carry.subarray(msg.next));
         if (msg.opcode === WS_PING) {
-          sendWs(WS_PONG, msg.payload); // R2: answer the relay's WS-level ping
+          sendWs(WS_PONG, msg.payload); // answer the relay's WS-level ping
         } else if (msg.opcode === WS_PONG) {
-          // liveness only; the only heartbeat is the server's (R2)
+          // liveness only; the relay owns the only heartbeat
         } else if (msg.opcode === WS_CLOSE) {
           fail(new Error('gateway closed the connection'));
         } else if (msg.opcode === WS_BINARY) {
@@ -256,7 +251,7 @@ export function startGateway({
         }
       }
     } catch (err) {
-      // Codec/WS protocol error → tear down (§2 fail-fast).
+      // A desynced peer can't be resynchronized, so tear down.
       fail(err);
     }
   }
@@ -268,7 +263,7 @@ export function startGateway({
       const url2 = urlTemplate.replace('<sub>', sub);
       attempt = 0;
       activeSince = Date.now();
-      // §4: re-fire only when the URL changed (R10 reclaim keeps it stable).
+      // Re-fire only when the URL changed; a reclaim keeps it stable.
       if (url2 !== lastUrl) {
         lastUrl = url2;
         onUrl?.(url2);
@@ -278,7 +273,7 @@ export function startGateway({
       const msg = payload.subarray(3, 3 + msgLen).toString();
       console.error(`devhop gateway: ${msg}`);
       // Transient codes (limit 3, governor 5) stay in the reconnect loop;
-      // everything else (bad token 1, banned 4, unknown version) is fatal (§4).
+      // everything else (bad token 1, banned 4, unknown version) is fatal.
       const err = new Error(`gateway refused registration: ${msg}`);
       if (payload[0] === 3 || payload[0] === 5) fail(err);
       else die(err);
@@ -286,14 +281,14 @@ export function startGateway({
       openStream(streamId, payload);
     } else if (type === FRAME.DATA) {
       const st = streams.get(streamId);
-      // Unknown streamId → ignore (R4 teardown race).
+      // Unknown streamId → ignore; the stream may have just been torn down.
       if (st) feedUpstream(st, payload);
     } else if (type === FRAME.CLOSE) {
       const st = streams.get(streamId);
       // Relay's direction is done; ours drains naturally (half-close).
       if (st && !st.socket.destroyed) st.socket.end();
     } else if (type === FRAME.PING) {
-      sendFrameWs(FRAME.PONG, payload); // §2: echo the timestamp back
+      sendFrameWs(FRAME.PONG, payload); // echo the timestamp back
     }
   }
 
@@ -301,7 +296,7 @@ export function startGateway({
     const st = { socket: null, pending: [], errored: false, closed: false };
     streams.set(streamId, st);
     const upstream = net.connect(localPort, '127.0.0.1', () => {
-      // §2 option (a): the OPEN payload (request head) goes upstream verbatim.
+      // The OPEN payload (request head) goes upstream verbatim.
       if (head.length) upstream.write(head);
     });
     st.socket = upstream;
@@ -309,9 +304,9 @@ export function startGateway({
       for (let off = 0; off < chunk.length; off += MAX_CHUNK) {
         sendFrameWs(FRAME.DATA, chunk.subarray(off, off + MAX_CHUNK), streamId);
       }
-      // R5 (client→relay side): the WSS send buffer is one per client (R1),
-      // so when it is over the mark, pause every stream's local socket read —
-      // TCP backpressure then propagates to each dev-server socket.
+      // The WSS send buffer is shared by every stream, so when it is over the
+      // mark, pause every stream's local socket read — TCP backpressure then
+      // propagates to each dev-server socket.
       if (socket && socket.writableLength > HIGH_WATER) {
         for (const s of streams.values()) s.socket.pause();
       }
@@ -334,10 +329,8 @@ export function startGateway({
     });
   }
 
-  // R5 (relay→local): over the mark → queue instead of ballooning the socket
-  // buffer; the 'drain' handler flushes.
-  // ponytail: queue-and-drain, not a credit/ACK scheme — swap when the relay
-  // grows credit-ACK flow control (§6b note).
+  // Over the mark → queue instead of ballooning the socket buffer; the
+  // 'drain' handler flushes.
   function feedUpstream(st, payload) {
     if (st.socket.writableLength > HIGH_WATER) {
       st.pending.push(payload);
@@ -375,7 +368,7 @@ export function startGateway({
       }
       socket = null;
     },
-    // TEST-ONLY (§9 test 3 cable-pull): destroy the WSS socket the way a
+    // TEST-ONLY (cable-pull test): destroy the WSS socket the way a
     // SIGKILL'd process would — abrupt RST, no WS CLOSE, no graceful end.
     // Not part of the public contract; do not use outside tests.
     destroyForTest: () => {
