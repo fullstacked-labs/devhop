@@ -8,8 +8,8 @@
 
 ## Key Capabilities
 - Live updates on save: Preserves the live WebSocket connection so phones refresh automatically when code is saved.
-- Solves Next.js 14–16 `allowedDevOrigins` cross-origin blocking and Server Actions CSRF mismatch (`x-action-redirect`).
-- Solves Vite 6 `server.allowedHosts` "host not allowed" 403 Forbidden errors.
+- Solves Next.js `allowedDevOrigins` cross-origin blocking and Server Actions CSRF mismatch (`x-action-redirect`).
+- Solves Vite 6+ `server.allowedHosts` "host not allowed" 403 Forbidden errors.
 - Grants Mobile Safari & Android Chrome full permissions for microphone (`getUserMedia`), camera, WebCrypto, and Passkeys via trusted HTTPS.
 - Relabels Host, Origin, and Referer headers in-process to `localhost:<port>` so dev servers treat the phone as local loopback traffic.
 - Tolerant input parsing: accepts bare ports (`3000`), `host:port`, and HTTP(S) URLs such as `http://localhost:5173` or `https://localhost:8443`; a bare `443` implies HTTPS.

@@ -58,7 +58,7 @@ If you load your site using your Wi-Fi address (like `http://192.168.1.50:3000`)
 * Speech-to-Text, voice dictation, and camera features crash instantly.
 * WebCrypto (token signing) and FaceID/TouchID (Passkeys) are disabled.
 
-Setting up self-signed certificates (`mkcert`) on an iPhone requires emailing certificate files to yourself, installing an iOS Configuration Profile, and digging through *Settings > General > About > Certificate Trust Settings*. Over 90% of developers give up.
+Setting up self-signed certificates (`mkcert`) on an iPhone requires emailing certificate files to yourself, installing an iOS Configuration Profile, and digging through *Settings > General > About > Certificate Trust Settings*.
 
 ### 3. Cafe and office Wi-Fi blocks your phone from seeing your laptop
 In coffee shops, airports, and offices, routers turn on "Client Isolation" for guest security. That means your phone and your laptop are forbidden from talking to each other directly, even on the same Wi-Fi.
@@ -101,11 +101,10 @@ In coffee shops, airports, and offices, routers turn on "Client Isolation" for g
 | **Command** | `npx devhop` | Download CLI + login | `npx untun` | $57 Mac App | Brew install |
 | **Account or Signup?** | **None** | Required | None | License key | None |
 | **Real HTTPS Padlock?** | **Yes** | Yes | Yes | Yes (local only) | Manual iOS Profile |
-| **Live Updates on Save (Next/Vite)**| **Yes** | ❌ Blocks connection | ❌ Blocks connection | ❌ Blocks connection | ⚠️ Wi-Fi IP mismatch |
-| **Next.js Server Actions Safe?** | **Yes** | ❌ 500 CSRF abort | ❌ 500 CSRF abort | ❌ 500 CSRF abort | ⚠️ Protocol mismatch |
-| **Vite 6 `allowedHosts` Safe?** | **Yes** | ❌ 403 Forbidden | ❌ 403 Forbidden | ❌ 403 Forbidden | ⚠️ Host mismatch |
+| **Live Updates on Save (Next/Vite)**| **Yes** | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Needs `allowedHosts` / `allowedDevOrigins` | ⚠️ Wi-Fi IP mismatch |
+| **Next.js Server Actions Safe?** | **Yes** | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Needs `serverActions.allowedOrigins` | ⚠️ Protocol mismatch |
+| **Vite 6+ `allowedHosts` Safe?** | **Yes** | ⚠️ 403 until host is allowed | ⚠️ 403 until host is allowed | ⚠️ 403 until host is allowed | ⚠️ Host mismatch |
 | **Terminal QR Code** | **Yes** (Compact) | ❌ Link only | ❌ Link only | ❌ App UI only | ❌ None |
-| **First-run reliability** | **Yes** (cached binary, auto-retry, `--no-autoupdate`) | — | ⚠️ Auto-update crash & `/tmp` eviction reported | — | — |
 | **Price** | **100% Free (MIT)** | $8+/mo after 1GB | Free | $57 one-time | Free |
 
 ---
