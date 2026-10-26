@@ -112,6 +112,20 @@ describe('gateway client REGISTER', () => {
     gw.close();
   });
 
+  it('derives the URL from a relay-host urlTemplate', async () => {
+    const urls = [];
+    const gw = startGateway({
+      localPort: 1,
+      gatewayUrl: `ws://127.0.0.1:${relayPort}`,
+      token: 'host',
+      urlTemplate: 'https://<sub>.relay.example.com',
+      onUrl: (u) => urls.push(u),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(urls[0].endsWith('.relay.example.com'));
+    gw.close();
+  });
+
   it('goes DEAD on a fatal REGISTER_ERR: onError + onClose, no reconnect', async () => {
     // Stand up a minimal gateway that answers every REGISTER with a fatal
     // (code 1) REGISTER_ERR and records how many connections it saw.

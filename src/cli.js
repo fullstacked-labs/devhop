@@ -52,8 +52,11 @@ export async function run(args = []) {
     // ws:// is for local/test relays, wss:// for real ones.
     if (!gatewayUrl || gatewayUrl.startsWith('-') || !/^wss?:\/\//.test(gatewayUrl)) {
       console.error(pc.red(`\nInvalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.`));
-      console.error(`Example: ${pc.cyan('devhop --gateway wss://devhop.se')}\n`);
+      console.error(`Example: ${pc.cyan('devhop --gateway wss://relay.example.com')}\n`);
       process.exit(1);
+    }
+    if (!isJson) {
+      console.error(pc.yellow('! --gateway is experimental: the wire protocol may change without notice.'));
     }
   }
   let targetPort = null;
@@ -178,6 +181,7 @@ export async function run(args = []) {
     tunnelHandle = startGateway({
       localPort: proxyPort,
       gatewayUrl,
+      urlTemplate: `https://<sub>.${new URL(gatewayUrl).hostname}`,
       token: process.env.DEVHOP_GATEWAY_TOKEN || '',
       ...callbacks
     });
