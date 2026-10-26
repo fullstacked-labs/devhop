@@ -4,6 +4,7 @@ import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { startGateway } from './gateway/client.js';
+import { collectDiagnostics, formatDiagnostics } from './doctor.js';
 import { createRequire } from 'node:module';
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json');
@@ -21,6 +22,7 @@ ${pc.bold('Usage:')}
   ${pc.green('npx devhop <target> --http2')}  Use HTTP/2 transport (corporate firewall bypass)
   ${pc.green('npx devhop --help')}            Show this help message
   ${pc.green('npx devhop --version')}         Show version
+  ${pc.green('npx devhop --doctor')}          Print diagnostics for bug reports
 
 ${pc.bold('Examples:')}
   ${pc.dim('$')} npx devhop 3000
@@ -40,6 +42,14 @@ export async function run(args = []) {
 
   if (args.includes('--version') || args.includes('-v')) {
     console.log(`v${VERSION}`);
+    return;
+  }
+
+  if (args.includes('--doctor')) {
+    const diagnostics = await collectDiagnostics();
+    console.log(
+      args.includes('--json') ? JSON.stringify({ event: 'doctor', ...diagnostics }) : formatDiagnostics(diagnostics)
+    );
     return;
   }
   const isJson = args.includes('--json');

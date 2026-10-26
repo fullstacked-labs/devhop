@@ -159,6 +159,7 @@ npx devhop [target] --json   Output tunnel JSON (for AI agents & scripts)
 npx devhop [target] --http2  Route tunnel over HTTP/2 (corporate firewall bypass)
 npx devhop --help            Show help message
 npx devhop --version         Show version
+npx devhop --doctor          Print diagnostics for bug reports
 ```
 
 ### Mobile inspector
@@ -205,6 +206,7 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
   | `reconnecting` | The tunnel is retrying | `attempt` (when known) |
   | `error` | Before exiting non-zero | `code`, `message` |
   | `closed` | After Ctrl+C or SIGTERM | none |
+  | `doctor` | `npx devhop --doctor --json` | the diagnostics fields: `devhop`, `node`, `platform`, `arch`, `cloudflared`, `devPorts`, `cacheDir` |
 
   ```json
   {"event":"ready","url":"https://example.trycloudflare.com","inspectUrl":"https://example.trycloudflare.com/__devhop/inspect","target":"http://127.0.0.1:3000","port":3000,"host":"127.0.0.1","protocol":"http:"}
