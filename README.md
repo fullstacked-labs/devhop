@@ -206,7 +206,7 @@ devhop rides Cloudflare's free quick tunnels (`trycloudflare.com`), which Cloudf
 
   | `event` | When | Fields |
   | --- | --- | --- |
-  | `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol` |
+  | `ready` | The public URL is known | `url`, `inspectUrl`, `target`, `port`, `host`, `protocol`, `edgeReady` (`false` if Cloudflare hadn't answered after 20 s) |
   | `reconnecting` | The tunnel is retrying | `attempt` |
   | `error` | Before exiting non-zero | `code`, `message` |
   | `closed` | After Ctrl+C or SIGTERM | none |

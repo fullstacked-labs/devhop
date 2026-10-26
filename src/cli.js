@@ -3,6 +3,7 @@ import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
+import { waitForEdge } from './edge.js';
 import { startGateway } from './gateway/client.js';
 import { collectDiagnostics, formatDiagnostics } from './doctor.js';
 import { createRequire } from 'node:module';
@@ -136,6 +137,8 @@ export async function run(args = []) {
 
   let publicUrl = null;
   let edgeLocation = null;
+  let edgeSlow = false;
+  let announced = false;
 
   // Create reverse proxy with header masquerade & response rewriting
   const { server } = createMasqueradeProxy({
@@ -165,7 +168,7 @@ export async function run(args = []) {
   };
   const quit = () => { exitingClean = true; cleanup(); process.exit(0); };
   const renderDashboard = () => {
-    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation);
+    displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation, edgeSlow);
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
     process.on(sig, quit);
@@ -177,14 +180,18 @@ export async function run(args = []) {
     process.exit(1);
   });
   process.on('exit', cleanup);
+  const announce = (url, edgeReady) => {
+    announced = true;
+    if (isJson) {
+      emit({ event: 'ready', url, inspectUrl: `${url}/__devhop/inspect`, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol, ...(edgeReady !== undefined && { edgeReady }) });
+    } else {
+      renderDashboard();
+    }
+  };
   const callbacks = {
     onUrl: (url) => {
       publicUrl = url;
-      if (isJson) {
-        emit({ event: 'ready', url, inspectUrl: `${url}/__devhop/inspect`, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol });
-      } else {
-        renderDashboard();
-      }
+      announce(url);
     },
     onRetry: (attempt) => {
       emit({ event: 'reconnecting', ...(typeof attempt === 'number' && { attempt }) });
@@ -220,10 +227,20 @@ export async function run(args = []) {
       onLocation: (loc) => {
         if (loc !== edgeLocation) {
           edgeLocation = loc;
-          if (publicUrl && !isJson) renderDashboard();
+          if (announced && !isJson) renderDashboard();
         }
       },
       ...callbacks,
+      // A fresh quick tunnel answers 530 for a few seconds after cloudflared
+      // prints its URL; announcing earlier sends the first scan to an error page.
+      onUrl: async (url) => {
+        publicUrl = url;
+        if (!isJson) console.log(pc.dim('  Waiting for Cloudflare edge...'));
+        const edge = await waitForEdge(url);
+        if (cleanedUp) return;
+        edgeSlow = !edge.ready;
+        announce(url, edge.ready);
+      },
       onRetry: (attempt) => {
         emit({ event: 'reconnecting', attempt });
         if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
@@ -253,7 +270,7 @@ export async function run(args = []) {
   }
 }
 
-function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation) {
+function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation, edgeSlow) {
   const scheme = targetProtocol === 'https:' ? 'https' : 'http';
   // Display-only: newer cloudflared reports IATA + connection index (e.g. ARN02);
   // humans only need the airport code.
@@ -265,6 +282,9 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${targetHost}:${targetPort}`)}`);
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);
   console.log(`  ${pc.yellow('⚠ Public link — anyone with it can open your dev server. Ctrl+C when done.')}`);
+  if (edgeSlow) {
+    console.log(`  ${pc.yellow("⚠ Cloudflare hasn't answered yet; if the page errors, wait a few seconds and reload.")}`);
+  }
   console.log('');
   if (edgeLocation) {
     console.log(`  ${pc.green('✔')} Connected to Cloudflare Edge [${iata}]`);

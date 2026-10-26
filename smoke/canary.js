@@ -25,13 +25,17 @@ function killAll() {
 async function fetchWithRetries(url, { timeoutMs = 60000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last;
+  let serverErrors = 0;
+  let networkErrors = 0;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(url);
-      const result = { status: res.status, body: await res.text() };
+      const result = { status: res.status, body: await res.text(), serverErrors, networkErrors };
       if (result.status < 500) return result;
+      serverErrors += 1;
       last = new Error(`HTTP ${result.status}`);
     } catch (err) {
+      networkErrors += 1;
       last = err;
     }
     await sleep(2000);
@@ -66,7 +70,11 @@ async function main() {
     };
   });
 
+  if (typeof ready.edgeReady !== 'boolean') throw new Error('ready event has no edgeReady field');
+  console.log(`edgeReady: ${ready.edgeReady}`);
+
   const page = await fetchWithRetries(ready.url);
+  console.log(`after ready: ${page.serverErrors} 5xx, ${page.networkErrors} network errors`);
   if (page.status !== 200 || /not allowed/i.test(page.body)) {
     throw new Error(`GET ${ready.url} returned ${page.status}`);
   }

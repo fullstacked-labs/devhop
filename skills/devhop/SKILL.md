@@ -43,7 +43,9 @@ npx devhop 3000 --http2             # use when the tunnel fails on networks that
    exactly as the dev server printed it.
 2. Run `npx devhop <port> --json` in the background. Stdout is one JSON object
    per line with an `event` field. Read lines until `event` is `"ready"`; it
-   carries `url`, `inspectUrl`, `target`, `port`, `host` and `protocol`. Later
+   carries `url`, `inspectUrl`, `target`, `port`, `host`, `protocol` and `edgeReady`
+   (`false` means Cloudflare hadn't answered after 20 s; tell the user to reload
+   after a few seconds). Later
    lines can be `reconnecting` (the tunnel is retrying), `error` (`code` and
    `message`, followed by a non-zero exit) and `closed`.
 3. Give the user the `url`. If they can see the terminal, tell them to scan
