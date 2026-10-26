@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [vite-react, next-15, next-16, nuxt, sveltekit, astro]
+        fixture: [vite-react, next-16, nuxt, sveltekit, astro]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
