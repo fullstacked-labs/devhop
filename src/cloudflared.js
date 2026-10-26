@@ -20,22 +20,28 @@ export const CLOUDFLARED_ASSETS = {
 
 const MAX_REDIRECTS = 5;
 
+export function nextRedirectUrl(current, location, redirects) {
+  if (redirects >= MAX_REDIRECTS) {
+    throw new Error(`too many redirects fetching ${current.pathname.split('/').pop()}`);
+  }
+  const next = new URL(location, current);
+  if (current.protocol === 'https:' && next.protocol !== 'https:') {
+    throw new Error(`refusing to follow a redirect to ${next.protocol}//${next.host}`);
+  }
+  return next;
+}
+
 function fetchToFile(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     const get = url.protocol === 'http:' ? http.get : https.get;
     const req = get(url, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
-        if (redirects >= MAX_REDIRECTS) {
-          reject(new Error(`too many redirects fetching ${url.pathname.split('/').pop()}`));
-          return;
+        try {
+          resolve(fetchToFile(nextRedirectUrl(url, res.headers.location, redirects), dest, redirects + 1));
+        } catch (err) {
+          reject(err);
         }
-        const next = new URL(res.headers.location, url);
-        if (url.protocol === 'https:' && next.protocol !== 'https:') {
-          reject(new Error(`refusing to follow a redirect to ${next.protocol}//${next.host}`));
-          return;
-        }
-        resolve(fetchToFile(next, dest, redirects + 1));
         return;
       }
       if (res.statusCode !== 200) {

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { downloadCloudflared } from '../src/cloudflared.js';
+import { downloadCloudflared, nextRedirectUrl } from '../src/cloudflared.js';
 
 const BODY = Buffer.from('not really a cloudflared binary');
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -62,4 +62,27 @@ test('downloadCloudflared names DEVHOP_CLOUDFLARED on an unsupported platform', 
     downloadCloudflared(tempDest(t), { platform: 'freebsd', arch: 'x64' }),
     /Unsupported platform freebsd-x64.*DEVHOP_CLOUDFLARED/
   );
+});
+
+test('nextRedirectUrl resolves a relative Location against the current URL', () => {
+  const next = nextRedirectUrl(new URL('https://example.com/a/b'), '/c/d', 0);
+  assert.equal(next.href, 'https://example.com/c/d');
+});
+
+test('nextRedirectUrl follows https to https', () => {
+  const next = nextRedirectUrl(new URL('https://example.com/a'), 'https://cdn.example.net/a', 0);
+  assert.equal(next.host, 'cdn.example.net');
+});
+
+test('nextRedirectUrl refuses https to http and names the target host', () => {
+  assert.throws(
+    () => nextRedirectUrl(new URL('https://example.com/a'), 'http://evil.example.net:8080/a', 0),
+    /refusing to follow a redirect to http:\/\/evil\.example\.net:8080/
+  );
+});
+
+test('nextRedirectUrl refuses the sixth redirect', () => {
+  const url = new URL('https://example.com/file');
+  assert.doesNotThrow(() => nextRedirectUrl(url, '/next', 4));
+  assert.throws(() => nextRedirectUrl(url, '/next', 5), /too many redirects/);
 });
