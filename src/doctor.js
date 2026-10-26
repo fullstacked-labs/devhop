@@ -27,6 +27,7 @@ export async function collectDiagnostics() {
     arch: process.arch,
     cloudflared: {
       path: tildify(binPath),
+      override: Boolean(process.env.DEVHOP_CLOUDFLARED),
       cached,
       version: cached ? cloudflaredVersion(binPath) : null,
     },
@@ -37,7 +38,7 @@ export async function collectDiagnostics() {
 
 export function formatDiagnostics(d) {
   const cloudflared = d.cloudflared.cached
-    ? `${d.cloudflared.path}${d.cloudflared.version ? ` — ${d.cloudflared.version}` : ''}`
+    ? `${d.cloudflared.path}${d.cloudflared.override ? ' (DEVHOP_CLOUDFLARED)' : ''}${d.cloudflared.version ? ` — ${d.cloudflared.version}` : ''}`
     : 'cloudflared not downloaded yet (downloads on first run)';
   return [
     '```',

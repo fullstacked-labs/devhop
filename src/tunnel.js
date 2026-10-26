@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { install } from 'cloudflared/lib/install.js';
+import { CLOUDFLARED_VERSION, downloadCloudflared } from './cloudflared.js';
 
 export function getBinPath() {
+  if (process.env.DEVHOP_CLOUDFLARED) return process.env.DEVHOP_CLOUDFLARED;
   const isWin = process.platform === 'win32';
   const binName = isWin ? 'cloudflared.exe' : 'cloudflared';
 
@@ -12,11 +13,19 @@ export function getBinPath() {
     ? path.join(process.env.XDG_CACHE_HOME, 'devhop', 'bin')
     : path.join(os.homedir(), '.cache', 'devhop', 'bin');
 
-  return path.join(cacheDir, binName);
+  // Versioned so bumping the pin fetches the new binary instead of reusing an old one.
+  return path.join(cacheDir, CLOUDFLARED_VERSION, binName);
 }
 
 export async function ensureBinary(onProgress) {
   const binPath = getBinPath();
+
+  if (process.env.DEVHOP_CLOUDFLARED) {
+    if (!fs.existsSync(binPath)) {
+      throw new Error(`DEVHOP_CLOUDFLARED points to ${binPath}, which does not exist.`);
+    }
+    return binPath;
+  }
 
   // If binary exists and is valid (> 1MB), reuse it
   if (fs.existsSync(binPath)) {
@@ -40,13 +49,27 @@ export async function ensureBinary(onProgress) {
   if (onProgress) onProgress('Downloading cloudflared binary (one-time setup)...');
 
   try {
-    await install(tempPath);
+    await downloadCloudflared(tempPath);
     fs.renameSync(tempPath, binPath);
     try { fs.chmodSync(binPath, '755'); } catch (_) {}
+    removeOldVersions(path.dirname(dir));
     return binPath;
   } catch (err) {
     try { fs.unlinkSync(tempPath); } catch (_) {}
     throw new Error(`Failed to install cloudflared: ${err.message}`);
+  }
+}
+
+// Older pins sit next to the current one as <version>/ directories; releases
+// before 0.2 cached an unversioned binary directly in the cache root.
+function removeOldVersions(cacheRoot) {
+  for (const legacy of ['cloudflared', 'cloudflared.exe']) {
+    try { fs.unlinkSync(path.join(cacheRoot, legacy)); } catch (_) {}
+  }
+  for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && /^\d{4}\.\d+\.\d+$/.test(entry.name) && entry.name !== CLOUDFLARED_VERSION) {
+      fs.rmSync(path.join(cacheRoot, entry.name), { recursive: true, force: true });
+    }
   }
 }
 

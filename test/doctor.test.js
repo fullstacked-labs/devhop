@@ -10,7 +10,7 @@ test('collectDiagnostics returns the documented keys', async () => {
     ['arch', 'cacheDir', 'cloudflared', 'devPorts', 'devhop', 'node', 'platform']
   );
   assert.equal(d.node, process.version);
-  assert.deepEqual(Object.keys(d.cloudflared).sort(), ['cached', 'path', 'version']);
+  assert.deepEqual(Object.keys(d.cloudflared).sort(), ['cached', 'override', 'path', 'version']);
 });
 
 test('formatDiagnostics says when cloudflared is not downloaded', () => {
@@ -19,7 +19,7 @@ test('formatDiagnostics says when cloudflared is not downloaded', () => {
     node: 'v22.0.0',
     platform: 'linux',
     arch: 'x64',
-    cloudflared: { path: '~/.cache/devhop/bin/cloudflared', cached: false, version: null },
+    cloudflared: { path: '~/.cache/devhop/bin/cloudflared', override: false, cached: false, version: null },
     devPorts: [],
     cacheDir: '~/.cache/devhop/bin',
   });

@@ -162,6 +162,10 @@ npx devhop --version         Show version
 npx devhop --doctor          Print diagnostics for bug reports
 ```
 
+### cloudflared
+
+On first run devhop downloads a pinned cloudflared release into `~/.cache/devhop/bin/<version>/` and checks its SHA-256 before using it. To use your own binary instead, set `DEVHOP_CLOUDFLARED=/path/to/cloudflared`; devhop then downloads nothing.
+
 ### Mobile inspector
 
 Open `https://<tunnel>/__devhop/inspect` on your phone for an app preview iframe, a one-tap Eruda bookmarklet, and bundler recipes for Vite and Next.js. The inspector leaves your app HTML untouched.
