@@ -17,10 +17,7 @@ npx devhop [port]
   Target:       http://localhost:3000
   Mobile URL:   https://breeze-sunset-vintage-glade.trycloudflare.com
 
-  ✔ Live updates on save active (phone refreshes automatically as you edit)
-  ✔ Real HTTPS padlock active (microphone, camera & voice dictation work)
-  ✔ Next.js & Vite safe (no "host not allowed" or blocked request errors)
-  ✔ Zero setup (no accounts, no tokens, no certificates to install)
+  ✔ Connected to Cloudflare Edge [ARN]
 
   Scan with your iPhone or Android camera:
   [ QR Code ]

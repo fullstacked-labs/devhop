@@ -14,13 +14,13 @@ ${pc.bold(pc.cyan('🦘 devhop'))} ${pc.dim(`v${VERSION}`)}
 ${pc.dim('Hop local web dev servers onto mobile devices with zero config.')}
 
 ${pc.bold('Usage:')}
-  ${pc.green('npx devhop [target]')}         Expose dev server by port, host:port, or URL
-  ${pc.green('npx devhop')}                  Auto-detect active dev server port
+  ${pc.green('npx devhop [target]')}          Expose dev server by port, host:port, or URL
+  ${pc.green('npx devhop')}                   Auto-detect active dev server port
   ${pc.green('npx devhop <target> --no-qr')}  Expose without printing QR code
   ${pc.green('npx devhop <target> --json')}   Output tunnel metadata as JSON (for agents)
   ${pc.green('npx devhop <target> --http2')}  Use HTTP/2 transport (corporate firewall bypass)
-  ${pc.green('npx devhop --help')}           Show this help message
-  ${pc.green('npx devhop --version')}        Show version
+  ${pc.green('npx devhop --help')}            Show this help message
+  ${pc.green('npx devhop --version')}         Show version
 
 ${pc.bold('Examples:')}
   ${pc.dim('$')} npx devhop 3000
@@ -28,12 +28,6 @@ ${pc.bold('Examples:')}
   ${pc.dim('$')} npx devhop 127.0.0.1:8080
   ${pc.dim('$')} npx devhop 0.0.0.0:4321
   ${pc.dim('$')} npx devhop http://localhost:5173
-${pc.bold('What it does:')}
-  ${pc.green('✔')} ${pc.bold('Live Updates on Save')}      Your phone updates automatically when you edit code
-  ${pc.green('✔')} ${pc.bold('Real HTTPS Padlock')}        Microphone, camera, and voice dictation work without errors
-  ${pc.green('✔')} ${pc.bold('Framework Friendly')}        Next.js & Vite never show "host not allowed" or blocked screens
-  ${pc.green('✔')} ${pc.bold('Logins & Redirects Safe')}   Stays logged in and keeps you on the mobile link after forms
-  ${pc.green('✔')} ${pc.bold('Zero Setup')}                No accounts, no tokens, no certificates to install
 `);
 }
 
@@ -239,11 +233,8 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log('');
   if (edgeLocation) {
     console.log(`  ${pc.green('✔')} Connected to Cloudflare Edge [${iata}]`);
+    console.log('');
   }
-  console.log(`  ${pc.green('✔')} ${pc.dim('Live updates on save active (phone refreshes automatically as you edit)')}`);
-  console.log(`  ${pc.green('✔')} ${pc.dim('Real HTTPS padlock active (microphone, camera & voice dictation work)')}`);
-  console.log(`  ${pc.green('✔')} ${pc.dim('Next.js & Vite safe (no "host not allowed" or blocked request errors)')}`);
-  console.log(`  ${pc.green('✔')} ${pc.dim('Zero setup (no accounts, no tokens, no certificates to install)')}`);
   if (showQr) {
     console.log(pc.dim('  Scan with your iPhone or Android camera:'));
     console.log('');

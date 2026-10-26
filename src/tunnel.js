@@ -124,7 +124,7 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
       manualClose = true;
       try {
         current.kill('SIGTERM');
-        // SIGKILL fallback after 500ms to guarantee zero zombie processes
+        // SIGKILL fallback: cloudflared must not outlive devhop if it ignores SIGTERM.
         setTimeout(() => {
           try {
             if (!current.killed) current.kill('SIGKILL');
