@@ -21,7 +21,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 | B13 | `src/cli.js` ignores unknown flags and extra targets | low | inspection |
 | B15 | `--json` events can be lost on `process.exit` | low | reproduced only with a stalled reader |
-| B16 | demo images are missing from the npm package | low | reproduced |
 
 ### Gateway (quarantined)
 
@@ -149,22 +148,6 @@ because of this.
 **Fix:** have `run()` return or throw an exit code, set `process.exitCode` in
 `bin/devhop.js`, and let the event loop drain. Add a test that reads stdout
 from a child process and asserts the final event is complete.
-
-### B16 — demo images are missing from the npm package
-
-**Where:** `package.json:12-20`, `README.md:11-14`
-
-`files` omits `docs/`, but the README references `docs/demo.avif` and
-`docs/demo-poster.png`. `npm pack --dry-run` shows 14 files (22.0 kB) and none
-of `docs/`, so the hero image is broken on the npm package page.
-
-**Fix:** use absolute raw GitHub URLs in the README, or add `docs/` to
-`files`. The AVIF is 1.8 MB; including it would make the package about 80
-times larger, so absolute URLs are the cheaper fix. The 106 KB poster would
-still multiply the size by about five.
-
-**Test:** `npm pack --dry-run` plus a check that every local image referenced
-by the README exists in the tarball.
 
 ## Gateway (quarantined)
 
@@ -782,7 +765,6 @@ to the quick-tunnel path.
   then assert every emitted code appears in the README and `llms.txt`, which
   prevents the B5 kind of drift.
 - Fix the README and `llms.txt` claims after the code fix, not before.
-- Fix the npm package contents (B16).
 - Keep `AGENTS.md`'s "Behaviour that looks simplifiable but isn't" section in
   view while working; it documents choices the audit did not flag.
 
@@ -798,7 +780,6 @@ standalone cleanup branch that adds review load without reducing risk.
 8. `fix(cli): reject unknown flags and extra targets` (B13)
 10. `test: split suites and add regression helpers` (Phase 4)
 11. Gateway quarantine (Phase 5, done 2026-10-27)
-12. `docs: use packaged demo assets or absolute URLs` (B16)
 
 Steps 1–6 are small, each has a reproduction, and none need a design decision.
 Step 7 pays for every later PR. B10 and B15 can ride along with the
@@ -812,8 +793,8 @@ or after step 7.
 - **TLS policy:** decided — devhop does not verify upstream certificates for
   any host, and the comment and docs now say so. Revisit with an opt-in flag if
   someone needs verification.
-- **Demo assets:** absolute GitHub URLs, or ship the poster and leave the AVIF
-  on GitHub. The current package is 22.0 kB.
+- **Demo assets:** decided — absolute raw GitHub URLs. `test/readme.test.js`
+  keeps relative image paths out of the README unless the package ships them.
 - **Error codes:** keep the README table hand-written, or generate it from
   `src/errors.js`. A generated table is more work up front and removes a whole
   class of drift.
@@ -876,3 +857,11 @@ Things found while fixing the items above. Newest last.
   `downloadCloudflared` seam on `ensureBinary` would remove the need.
 - The B12 permission test skips as root and on Windows, so CI containers that
   run as root skip it silently.
+- The README images now point at `raw.githubusercontent.com/.../main/docs/`.
+  `docs/demo.avif` is only on the branch until it merges to `main`, so the
+  images 404 (on npm and GitHub) until then. Branch previews on GitHub also
+  show `main`'s images, not the branch's.
+- `test/readme.test.js` is a new file because nothing existing owns README
+  checks. It parses `src`, `srcset` and `![](…)` references only; a relative
+  `<a href>` to a file outside `files` (the badge links to `./skills/…`, which
+  does ship) is not checked.
