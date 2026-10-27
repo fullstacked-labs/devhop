@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { CLOUDFLARED_VERSION, downloadCloudflared } from './cloudflared.js';
 
 export function getBinPath() {
@@ -96,16 +97,12 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
 
     let urlFound = false;
     const recentOutput = [];
-    const handleOutput = (data) => {
-      const text = data.toString();
-      for (const raw of text.split('\n')) {
-        const line = raw.trim();
-        if (line) {
-          recentOutput.push(line);
-          if (recentOutput.length > 10) recentOutput.shift();
-        }
-      }
-      const locMatch = text.match(/location=([A-Z0-9]+)/i);
+    const handleLine = (raw) => {
+      const line = raw.trim();
+      if (!line) return;
+      recentOutput.push(line);
+      if (recentOutput.length > 10) recentOutput.shift();
+      const locMatch = line.match(/location=([A-Z0-9]+)/i);
       if (locMatch && onLocation) {
         const loc = locMatch[1].toUpperCase();
         if (loc !== lastLocation) {
@@ -113,15 +110,17 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
           onLocation(loc);
         }
       }
-      const urlMatch = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      const urlMatch = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
       if (urlMatch && !urlFound) {
         urlFound = true;
         if (onUrl) onUrl(urlMatch[0]);
       }
     };
 
-    child.stdout.on('data', handleOutput);
-    child.stderr.on('data', handleOutput);
+    // A pipe read can end mid-line, so match on complete lines only.
+    for (const stream of [child.stdout, child.stderr]) {
+      createInterface({ input: stream }).on('line', handleLine);
+    }
 
     child.on('error', (err) => {
       if (onError) onError(err, { recentOutput: recentOutput.join('\n'), urlFound });

@@ -445,18 +445,52 @@ test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   assert.deepStrictEqual(locations, ['ARN']);
 });
 
-test('Tunnel location regex matches location=([A-Z0-9]+) case-insensitively', () => {
-  const samples = [
-    ['INF Registered tunnel connection connIndex=0 location=ARN', 'ARN'],
-    ['connIndex=3 location=lhr', 'LHR'],
-    ['location=SIN col=1', 'SIN'],
-  ];
-  for (const [line, expected] of samples) {
-    const m = line.match(/location=([A-Z0-9]+)/i);
-    assert.ok(m, `Should match edge location in: ${line}`);
-    assert.strictEqual(m[1].toUpperCase(), expected);
-  }
-  assert.strictEqual('no edge info here'.match(/location=([A-Z0-9]+)/i), null);
+test('Tunnel recognises the URL and edge location when a line arrives in two writes', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-split-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, 'fake-cloudflared.sh');
+  fs.writeFileSync(stub, [
+    '#!/bin/sh',
+    'printf "INF https://split-test.try"',
+    'sleep 0.15',
+    'printf "cloudflare.com\\n"',
+    'printf "INF Registered tunnel connection loca"',
+    'sleep 0.15',
+    'printf "tion=lhr connIndex=0\\n"',
+    'sleep 0.15',
+  ].join('\n'));
+  fs.chmodSync(stub, '755');
+
+  const urls = [];
+  const locations = [];
+  await new Promise((resolve) => {
+    startTunnel({
+      localPort: 3000,
+      binPath: stub,
+      onUrl: (url) => urls.push(url),
+      onLocation: (loc) => locations.push(loc),
+      onClose: () => resolve(),
+    });
+  });
+
+  assert.deepStrictEqual(urls, ['https://split-test.trycloudflare.com']);
+  assert.deepStrictEqual(locations, ['LHR']);
+});
+
+test('Tunnel parses a final line that has no trailing newline', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-nonl-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, 'fake-cloudflared.sh');
+  fs.writeFileSync(stub, '#!/bin/sh\nprintf "https://no-newline.trycloudflare.com"\n');
+  fs.chmodSync(stub, '755');
+
+  const urls = [];
+  await new Promise((resolve) => {
+    startTunnel({ localPort: 3000, binPath: stub, onUrl: (url) => urls.push(url), onClose: () => resolve() });
+  });
+  assert.deepStrictEqual(urls, ['https://no-newline.trycloudflare.com']);
 });
 
 test('Tunnel keeps 10-line ring buffer of recent output on premature exit', async (t) => {

@@ -16,7 +16,6 @@ item once its fix lands, or mark it done with a link to the commit.
 
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
-| B1 | `src/tunnel.js` parses cloudflared output per chunk | high | reproduced |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B3 | `src/proxy.js` leaks the upstream request on client abort | high | reproduced |
 | B4 | `src/proxy.js` drops the body of a refused upgrade | medium-high | reproduced |
@@ -69,29 +68,6 @@ items change runtime behaviour by itself; they are what makes the behaviour
 fixes expensive to review.
 
 ## Shipping path
-
-### B1 — cloudflared output is parsed per chunk
-
-**Where:** `src/tunnel.js:99-121`
-
-The URL and `location=` regexes run against each raw `data` chunk. A line split
-across two chunks is never recognised, so the tunnel can stay connected while
-devhop never announces it.
-
-**Repro:** a stub printed `https://split-test.try` and `cloudflare.com` in two
-writes. Events were `retry:1`, then `close:0:false`; no URL was emitted and the
-run ended in `TUNNEL_EXITED`.
-
-How often this fires with a real cloudflared is unmeasured: it needs a pipe
-read to end mid-line, and cloudflared probably writes each log line in one
-piece. The mechanism is real; "high" assumes it is common.
-
-**Fix:** buffer output by line (or use `readline.createInterface`) for both
-stdout and stderr, parse complete lines, and keep the residual. Store lines,
-not chunks, in the 10-line ring buffer.
-
-**Test:** a fake child writes a URL across two chunks and a `location=` line
-across two more; both must be parsed exactly once.
 
 ### B2 — the SIGKILL fallback never fires
 
@@ -765,10 +741,6 @@ one shape.
 - The idle test asserts `sockets <= baseline`; with G3 the count is
   `baseline - 1`, so the test passes while the governor is broken. Use
   `assert.equal`.
-- The location test re-implements `/location=([A-Z0-9]+)/i` and matches it
-  against strings; it never calls `startTunnel`. It cannot catch B1's
-  split-chunk bug. Replace it with a fake child that writes the line across two
-  chunks.
 - The retry test polls with `setInterval` and no deadline; if `onClose` never
   fires, the test hangs instead of failing.
 - `cable-pull.test.js` ends with `process.exit(0)` inside the test body. That
@@ -778,7 +750,7 @@ one shape.
 **Fix:** assert exact state; drive the behaviour through the public function;
 add a deadline to every poll; close servers and return from the test.
 
-**Test:** mutate the code to reintroduce B1/G3 and confirm the test fails.
+**Test:** mutate the code to reintroduce G3 and confirm the test fails.
 
 #### A6 — wall-clock sleeps as synchronization
 
@@ -898,8 +870,6 @@ This is the highest-value change and fixes B7 and B13.
 
 ### Phase 3 — harden the tunnel and downloader
 
-- Split tunnel parsing into `parseTunnelLine(line)`, a line buffer, and a
-  caller that feeds it from stdout and stderr. Fixes B1.
 - `startTunnel({ spawnImpl = spawn, ... })`: tests inject a fake child instead
   of `/bin/sh` and `sleep`. This removes the Windows skips and most of the
   suite's wall-clock time.
@@ -969,7 +939,6 @@ standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-1. `fix(tunnel): parse cloudflared output line by line` (B1)
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
 3. `fix(proxy): tear down upstream when the client disconnects` (B3)
 4. `fix(proxy): forward the body of a refused upgrade` (B4)
@@ -999,3 +968,16 @@ or after step 7.
 - **Error codes:** keep the README table hand-written, or generate it from
   `src/errors.js`. A generated table is more work up front and removes a whole
   class of drift.
+
+## Notes from the fix pass
+
+Things found while fixing the items above. Newest last.
+
+- The baseline change (`refactor: quarantine the gateway transport`) also
+  carries the 🦘→🐇 help-banner edit, because the working copy already held it
+  under a stale `feat(cli): use a rabbit…` description.
+- Tunnel stubs cannot be node scripts on Windows: `spawn` cannot execute a
+  `.js` file there, so the `/bin/sh` stubs and their Windows skips stay. Only
+  an injected `spawnImpl` (Phase 3) removes the skips.
+- The "regex only" location test was deleted with B1; the split-chunk test
+  drives `startTunnel` and fails on the old code.
