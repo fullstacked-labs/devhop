@@ -19,6 +19,8 @@ export const CLOUDFLARED_ASSETS = {
 };
 
 const MAX_REDIRECTS = 5;
+// Idle time on the socket, not total time: a slow link that keeps delivering is fine.
+const IDLE_TIMEOUT_MS = 30_000;
 
 export function nextRedirectUrl(current, location, redirects) {
   if (redirects >= MAX_REDIRECTS) {
@@ -31,14 +33,14 @@ export function nextRedirectUrl(current, location, redirects) {
   return next;
 }
 
-function fetchToFile(url, dest, redirects = 0) {
+function fetchToFile(url, dest, idleTimeoutMs, redirects = 0) {
   return new Promise((resolve, reject) => {
     const get = url.protocol === 'http:' ? http.get : https.get;
-    const req = get(url, (res) => {
+    const req = get(url, { timeout: idleTimeoutMs }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         try {
-          resolve(fetchToFile(nextRedirectUrl(url, res.headers.location, redirects), dest, redirects + 1));
+          resolve(fetchToFile(nextRedirectUrl(url, res.headers.location, redirects), dest, idleTimeoutMs, redirects + 1));
         } catch (err) {
           reject(err);
         }
@@ -58,11 +60,16 @@ function fetchToFile(url, dest, redirects = 0) {
       });
       pipeline(res, tap, fs.createWriteStream(dest)).then(() => resolve(hash.digest('hex')), reject);
     });
+    req.on('timeout', () => {
+      req.destroy(new Error(
+        `no data from ${url.host} for ${idleTimeoutMs / 1000}s; check your network or proxy, or set DEVHOP_CLOUDFLARED=/path/to/cloudflared`
+      ));
+    });
     req.on('error', reject);
   });
 }
 
-// `baseUrl` and `assets` are overridable so tests can use a local server and their own hashes.
+// `baseUrl`, `assets` and `idleTimeoutMs` are overridable so tests can use a local server, their own hashes and a short timeout.
 export async function downloadCloudflared(
   dest,
   {
@@ -70,6 +77,7 @@ export async function downloadCloudflared(
     arch = process.arch,
     baseUrl = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}`,
     assets = CLOUDFLARED_ASSETS,
+    idleTimeoutMs = IDLE_TIMEOUT_MS,
   } = {}
 ) {
   const asset = assets[`${platform}-${arch}`];
@@ -87,7 +95,7 @@ export async function downloadCloudflared(
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let actual;
   try {
-    actual = await fetchToFile(new URL(`${baseUrl}/${asset.file}`), target);
+    actual = await fetchToFile(new URL(`${baseUrl}/${asset.file}`), target, idleTimeoutMs);
   } catch (err) {
     discard();
     throw err;

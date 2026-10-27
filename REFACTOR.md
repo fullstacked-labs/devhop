@@ -18,7 +18,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
-| B9 | `src/cloudflared.js` download has no timeout | medium | inspection |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 | B11 | `src/doctor.js` misreports a missing `DEVHOP_CLOUDFLARED` | low | reproduced |
 | B12 | `src/tunnel.js` cache cleanup can fail a good install | low | inspection |
@@ -108,20 +107,6 @@ fails with `INVALID_GATEWAY_URL`, not `INVALID_TARGET`.
 **Resolved by quarantine:** the flag is gone, so `--gateway` now exits with
 `GATEWAY_UNAVAILABLE` and never reaches target parsing. Reviving the transport
 means fixing this in the new argument parser, not restoring the old block.
-
-### B9 — the cloudflared download can hang forever
-
-**Where:** `src/cloudflared.js:34-63`
-
-`fetchToFile` has no request timeout. A stalled GitHub connection leaves
-`npx devhop` at "Downloading cloudflared binary…" with no next step.
-
-**Fix:** add an idle or overall timeout (`req.setTimeout` or
-`AbortSignal.timeout`) and an error that says what to check. Preserve the
-redirect chain.
-
-**Test:** a local server accepts the connection and never responds; the
-download rejects with a timeout error instead of hanging the test run.
 
 ### B10 — free-port race and unhandled `listen` error
 
@@ -779,7 +764,6 @@ This is the highest-value change and fixes B7 and B13.
 - Fix `close()` escalation with an `exit` listener and an exit-code check
   (B2).
 - Make cache cleanup best-effort (B12).
-- Add a timeout to `fetchToFile` and a test for a stalled download (B9).
 
 ### Phase 4 — split the tests by module
 
@@ -845,8 +829,7 @@ standalone cleanup branch that adds review load without reducing risk.
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
 7. `refactor(cli): extract argument parsing and UI` (prep for B13)
 8. `fix(cli): reject unknown flags and extra targets` (B13)
-9. `fix(cloudflared): time out stalled downloads` (B9) and
-   `fix(doctor): report a missing DEVHOP_CLOUDFLARED` (B11)
+9. `fix(doctor): report a missing DEVHOP_CLOUDFLARED` (B11)
 10. `test: split suites and add regression helpers` (Phase 4)
 11. Gateway quarantine (Phase 5, done 2026-10-27)
 12. `docs: use packaged demo assets or absolute URLs` (B16)
@@ -911,3 +894,12 @@ Things found while fixing the items above. Newest last.
   all. A spike was impossible here: this sandbox cannot connect to the machine's
   own LAN address, so the non-loopback case is covered by reading
   `proxy.js` only.
+- B9 uses an idle timeout (30 s of socket silence), so a slow but moving
+  download still finishes and a stall mid-body is caught too. The timeout is a
+  `downloadCloudflared` option like `baseUrl` and `assets`, so the tests use
+  200 ms. The download is pinned to GitHub's release host and redirects, which I
+  could not exercise from this sandbox, so the 30 s default is unmeasured
+  against the real CDN.
+- The test server helper in `test/cloudflared.test.js` now calls
+  `closeAllConnections()`, otherwise a deliberately stalled socket keeps
+  `server.close()` waiting.

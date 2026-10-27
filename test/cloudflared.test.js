@@ -14,7 +14,10 @@ const assetsFor = (hash) => ({ 'linux-x64': { file: 'cloudflared-linux-amd64', s
 async function serve(t, handler) {
   const server = http.createServer(handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   return `http://127.0.0.1:${server.address().port}`;
 }
 
@@ -55,6 +58,29 @@ test('downloadCloudflared follows five redirects and rejects a sixth', async (t)
   await downloadCloudflared(fiveDest, opts(`${baseUrl}/chain/5`, sha(BODY)));
   assert.deepEqual(fs.readFileSync(fiveDest), BODY);
   await assert.rejects(downloadCloudflared(tempDest(t), opts(`${baseUrl}/chain/6`, sha(BODY))), /too many redirects/);
+});
+
+test('downloadCloudflared gives up on a server that never answers', async (t) => {
+  const baseUrl = await serve(t, () => {});
+  const dest = tempDest(t);
+  await assert.rejects(
+    downloadCloudflared(dest, { ...opts(baseUrl, sha(BODY)), idleTimeoutMs: 200 }),
+    /no data from 127\.0\.0\.1:\d+ for 0\.2s.*DEVHOP_CLOUDFLARED/
+  );
+  assert.equal(fs.existsSync(dest), false);
+});
+
+test('downloadCloudflared gives up on a download that stalls midway', async (t) => {
+  const baseUrl = await serve(t, (_req, res) => {
+    res.writeHead(200, { 'content-length': String(BODY.length) });
+    res.write(BODY.subarray(0, 4));
+  });
+  const dest = tempDest(t);
+  await assert.rejects(
+    downloadCloudflared(dest, { ...opts(baseUrl, sha(BODY)), idleTimeoutMs: 200 }),
+    /no data from/
+  );
+  assert.equal(fs.existsSync(dest), false);
 });
 
 test('downloadCloudflared names DEVHOP_CLOUDFLARED on an unsupported platform', async (t) => {
