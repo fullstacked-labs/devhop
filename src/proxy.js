@@ -193,8 +193,8 @@ export function createMasqueradeProxy({
         method: req.method,
         path: req.url,
         headers: masqueradeRequestHeaders(req),
-        // Self-signed local certs are fine: loopback traffic never leaves the
-        // kernel, so there is no MITM exposure.
+        // Dev servers use self-signed certs and you chose this target, so the
+        // certificate is not verified. That holds for non-loopback hosts too.
         ...(upstreamIsHttps ? { rejectUnauthorized: false } : {})
       },
       (upstreamRes) => {

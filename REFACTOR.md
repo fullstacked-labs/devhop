@@ -18,7 +18,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
-| B8 | `src/proxy.js` disables TLS verification for every host | medium | inspection |
 | B9 | `src/cloudflared.js` download has no timeout | medium | inspection |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 | B11 | `src/doctor.js` misreports a missing `DEVHOP_CLOUDFLARED` | low | reproduced |
@@ -109,21 +108,6 @@ fails with `INVALID_GATEWAY_URL`, not `INVALID_TARGET`.
 **Resolved by quarantine:** the flag is gone, so `--gateway` now exits with
 `GATEWAY_UNAVAILABLE` and never reaches target parsing. Reviving the transport
 means fixing this in the new argument parser, not restoring the old block.
-
-### B8 — TLS verification is disabled for every host
-
-**Where:** `src/proxy.js:183`
-
-The comment says loopback traffic never leaves the kernel, but `parseTarget`
-accepts any `host:port`. `rejectUnauthorized: false` therefore applies to a
-remote host such as `https://example.com:8443`.
-
-**Fix:** disable verification only for loopback (`localhost`, `127.0.0.0/8`,
-`::1`, and the `0.0.0.0`/`::` aliases), or make it an explicit opt-in. Keep the
-loopback case because self-signed dev certs are the point.
-
-**Test:** a remote self-signed cert is rejected; a loopback self-signed cert
-still works.
 
 ### B9 — the cloudflared download can hang forever
 
@@ -598,14 +582,12 @@ version of the same list.
 
 #### A2 — comments assert properties the code does not enforce
 
-**Where:** `src/gateway/client.js:29-30`, `src/proxy.js:181-182`,
+**Where:** `src/gateway/client.js:29-30`,
 `src/gateway/relay.js:286`, `src/gateway/frames.js:11-12`,
 `src/cloudflared.js:101`
 
 - "exported so tests can assert the sequence directly" — no test imports
   `backoffDelay` (D4).
-- "loopback traffic never leaves the kernel" — `parseTarget` accepts any host,
-  so `rejectUnauthorized: false` applies to remote targets too (B8).
 - "unknown-but-valid codec types can't occur" — `REGISTER_OK`, `REGISTER_ERR`,
   and `PONG` are valid codec types and can arrive from a client;
   `#onClientFrame` silently ignores them.
@@ -617,7 +599,7 @@ version of the same list.
   `renameSync` and on the cache path.
 
 **Fix:** make each comment match the enforced behaviour, or enforce it. Where a
-claim is a security property (B8), add the test before keeping the comment.
+claim is a security property, add the test before keeping the comment.
 
 **Test:** one assertion per claim that stays; delete the rest.
 
@@ -870,7 +852,7 @@ standalone cleanup branch that adds review load without reducing risk.
 12. `docs: use packaged demo assets or absolute URLs` (B16)
 
 Steps 1–6 are small, each has a reproduction, and none need a design decision.
-Step 7 pays for every later PR. B8, B10, B12, and B15 can ride along with the
+Step 7 pays for every later PR. B10, B12, and B15 can ride along with the
 files they touch. Step 2 needs `quit()` to await `close()`, so it lands with
 or after step 7.
 
@@ -878,8 +860,9 @@ or after step 7.
 
 - **Gateway:** decided — quarantined on 2026-10-27. G1–G10 are research debt,
   not roadmap, until someone chooses to finish the transport.
-- **TLS policy:** loopback-only `rejectUnauthorized: false`, or an explicit
-  flag for remote self-signed hosts. B8 can be fixed either way.
+- **TLS policy:** decided — devhop does not verify upstream certificates for
+  any host, and the comment and docs now say so. Revisit with an opt-in flag if
+  someone needs verification.
 - **Demo assets:** absolute GitHub URLs, or ship the poster and leave the AVIF
   on GitHub. The current package is 22.0 kB.
 - **Error codes:** keep the README table hand-written, or generate it from
@@ -922,3 +905,9 @@ Things found while fixing the items above. Newest last.
   so no working consumer can depend on it.
 - `::` is treated like `0.0.0.0` and mapped to loopback (`::1`) in the proxy.
   `parseTarget('[::]:3000')` was not covered by the old tests either.
+- B8 was closed by a decision, not a code change. Skipping verification only
+  for loopback would break self-signed HTTPS in containers, VMs and LAN boxes,
+  and devhop already forwards plain `http://` to any host with no protection at
+  all. A spike was impossible here: this sandbox cannot connect to the machine's
+  own LAN address, so the non-loopback case is covered by reading
+  `proxy.js` only.

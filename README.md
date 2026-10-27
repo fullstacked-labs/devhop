@@ -81,7 +81,7 @@ For an HTTPS dev server, pass the upstream URL including its scheme:
 npx devhop https://localhost:8443
 ```
 
-Targets accept bare ports, `host:port`, and `http://` or `https://` URLs. A bare `443` implies HTTPS. Self-signed certificates on loopback are accepted. If the upstream scheme is wrong, devhop returns a `502` with a hint to retry using the matching URL scheme.
+Targets accept bare ports, `host:port`, and `http://` or `https://` URLs. A bare `443` implies HTTPS. devhop does not verify the upstream certificate, so self-signed dev certificates work; point it only at servers you trust. If the upstream scheme is wrong, devhop returns a `502` with a hint to retry using the matching URL scheme.
 
 ### Options
 

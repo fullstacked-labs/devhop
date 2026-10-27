@@ -15,7 +15,7 @@ Checked nightly in CI (page loads and hot reload works through the tunnel, and t
 - Next.js 16 refuses the `/_next/hmr` WebSocket from a tunnel host (`allowedDevOrigins`); devhop makes hot reload work without that config.
 - Trusted HTTPS gives Mobile Safari and Android Chrome a secure context for microphone and camera (`getUserMedia`), WebCrypto and Passkeys.
 - Tolerant input parsing: accepts bare ports (`3000`), `host:port`, and HTTP(S) URLs such as `http://localhost:5173` or `https://localhost:8443`; a bare `443` implies HTTPS.
-- Upstream HTTPS accepts self-signed certificates on loopback. A wrong scheme returns `502` with a hint to retry using the matching URL scheme.
+- Upstream HTTPS certificates are not verified, so self-signed certificates work. A wrong scheme returns `502` with a hint to retry using the matching URL scheme.
 - Prints a compact terminal QR code (`--no-qr` to skip).
 - Mobile inspector: `https://<tunnel>/__devhop/inspect` provides an app preview iframe, a one-tap Eruda bookmarklet, and Vite/Next.js bundler recipes.
 - Agent-ready: `--json` prints one JSON event per line on stdout (`ready` with `url`, `inspectUrl` and `edgeReady`; `reconnecting`; `error` with a stable `code`; `closed`) so coding agents can act on failures.
