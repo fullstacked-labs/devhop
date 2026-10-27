@@ -154,6 +154,23 @@ export function createMasqueradeProxy({
     return headers;
   }
 
+  // TLS to a plain-HTTP server fails as EPROTO (older Node: ERR_SSL_WRONG_VERSION_NUMBER);
+  // some servers just reset the connection instead.
+  const TLS_MISMATCH_CODES = new Set(['EPROTO', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ECONNRESET']);
+
+  function schemeHint(err) {
+    const target = `${normalizedHost}:${targetPort}`;
+    if (upstreamIsHttps && TLS_MISMATCH_CODES.has(err?.code)) {
+      return `devhop: TLS handshake with port ${targetPort} failed — the dev server may be plain HTTP. Try: npx devhop http://${target}`;
+    }
+    // A TLS server drops a plain-HTTP request without answering; a crashed
+    // server looks the same, so the hint stays conditional.
+    if (!upstreamIsHttps && err?.code === 'ECONNRESET') {
+      return `devhop: port ${targetPort} closed the connection without a response — if the dev server uses HTTPS, try: npx devhop https://${target}`;
+    }
+    return null;
+  }
+
   function send502(res, err) {
     if (!res || res.headersSent || !res.writable) return;
     try {
@@ -161,11 +178,7 @@ export function createMasqueradeProxy({
         'Content-Type': 'text/plain',
         'Retry-After': '1'
       });
-      res.end(
-        err?.code === 'ECONNRESET' && upstreamIsHttps
-          ? `devhop: TLS handshake failed on port ${targetPort} — is the dev server really HTTPS? Try: npx devhop http://${normalizedHost}:${targetPort}`
-          : `devhop: Target server not responding on port ${targetPort}`
-      );
+      res.end(schemeHint(err) ?? `devhop: Target server not responding on port ${targetPort}`);
     } catch (_) {}
   }
 

@@ -495,6 +495,60 @@ for (const [label, bodySize] of [['small', 5], ['multi-chunk', 200_000]]) {
   });
 }
 
+test('Proxy suggests http:// when an https: target is really plain HTTP', async (t) => {
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const backend = http.createServer((req, res) => res.end('plain'));
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetProtocol: 'https:' });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.close();
+    proxyServer.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), new RegExp(`Try: npx devhop http://127\\.0\\.0\\.1:${backendPort}`));
+});
+
+test('Proxy suggests https:// when an http: target is really TLS', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-scheme-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'),
+    '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const backend = https.createServer(
+    { key: fs.readFileSync(path.join(dir, 'key.pem')), cert: fs.readFileSync(path.join(dir, 'cert.pem')) },
+    (req, res) => res.end('secure')
+  );
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetProtocol: 'http:' });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.close();
+    proxyServer.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), new RegExp(`try: npx devhop https://127\\.0\\.0\\.1:${backendPort}`));
+});
+
+test('Proxy keeps the generic 502 when nothing is listening on the target', async (t) => {
+  const deadPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: deadPort });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => proxyServer.close());
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), /Target server not responding/);
+});
+
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');
   if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }

@@ -17,7 +17,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
-| B5 | `src/proxy.js` wrong-scheme hint almost never fires | medium-high | reproduced |
 | B6 | `src/port.js` keeps IPv6 brackets, so targets fail to connect | medium | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B8 | `src/proxy.js` disables TLS verification for every host | medium | inspection |
@@ -89,25 +88,6 @@ escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
 **Test:** a stub traps SIGTERM and stays alive; `close()` must resolve with the
 stub dead within the fallback window, including when the caller exits right
 after awaiting it.
-
-### B5 — the wrong-scheme hint almost never fires
-
-**Where:** `src/proxy.js:164-167`, `README.md:84`, `llms.txt:18`
-
-The hint is gated on `err.code === 'ECONNRESET' && upstreamIsHttps`. A plain
-HTTP dev server addressed as `https:` fails with `EPROTO`, so the user gets
-"Target server not responding" and the README claim is false.
-
-**Repro:** an HTTP backend plus `targetProtocol: 'https:'` returned 502 with
-the generic body; the raw error was `EPROTO` (TLS wrong version number). The
-reverse (`targetProtocol: 'http:'` pointing at a TLS server) also returns the
-generic 502.
-
-**Fix:** classify `EPROTO`, `ECONNRESET`, and TLS handshake errors as a scheme
-mismatch, and cover the reverse direction (`http:` pointing at an HTTPS
-server). Keep the README claim only once the code produces the hint.
-
-**Test:** both directions return a 502 whose body names the matching scheme.
 
 ### B6 — IPv6 targets can never connect
 
@@ -790,7 +770,7 @@ pile of closures.
   spends seconds waiting for stubs, and contributors on Windows cannot run the
   tunnel cases.
 - README, `llms.txt`, and `SKILL.md` repeat behaviour claims, and one of them
-  is already false (B5). There is no machine-checkable link between the error
+  was false until the B5 fix. There is no machine-checkable link between the error
   codes the code emits and the table in the README.
 - There is no human-facing architecture or contribution guide. `AGENTS.md` is
   written for agents and assumes the reader already knows the module seams.
@@ -901,7 +881,6 @@ standalone cleanup branch that adds review load without reducing risk.
 ## Suggested PR order
 
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
-5. `fix(proxy): report a wrong upstream scheme` (B5)
 6. `fix(port): normalise IPv6 loopback targets` (B6)
 7. `refactor(cli): extract argument parsing and UI` (prep for B13)
 8. `fix(cli): reject unknown flags and extra targets` (B13)
@@ -950,3 +929,10 @@ Things found while fixing the items above. Newest last.
   enough to keep. A keep-alive upstream never closes after its 404, so the proxy
   releases the client after 5 s of upstream silence (measured: 5015 ms, body
   intact).
+- The B5 hint covers plain requests only. A WebSocket upgrade to a wrong-scheme
+  upstream still just drops the socket in `proxyUpgrade`, with no message.
+- `ECONNRESET` on an `http:` target is also what a crashed dev server looks
+  like, so that hint is worded as a conditional ("if the dev server uses
+  HTTPS"). Node 26 reports a plain-HTTP server reached over TLS as `EPROTO`;
+  older Node versions use `ERR_SSL_WRONG_VERSION_NUMBER`, which is also handled
+  but untested.
