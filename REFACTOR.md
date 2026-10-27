@@ -17,7 +17,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
-| B6 | `src/port.js` keeps IPv6 brackets, so targets fail to connect | medium | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B8 | `src/proxy.js` disables TLS verification for every host | medium | inspection |
 | B9 | `src/cloudflared.js` download has no timeout | medium | inspection |
@@ -88,23 +87,6 @@ escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
 **Test:** a stub traps SIGTERM and stays alive; `close()` must resolve with the
 stub dead within the fallback window, including when the caller exits right
 after awaiting it.
-
-### B6 — IPv6 targets can never connect
-
-**Where:** `src/port.js:57`, `src/proxy.js:88`, `test/proxy.test.js:243-244`
-
-`parseTarget('[::1]:3000')` returns host `[::1]` with brackets. `net.connect`
-does not resolve that form and fails with `ENOTFOUND`. The current test asserts
-the bracketed shape, so it passes while the feature is broken.
-
-**Repro:** `parseTarget('[::1]:3000')` returned `{ host: '[::1]' }`;
-`net.connect({ host: '[::1]' })` failed with `ENOTFOUND [::1]`.
-
-**Fix:** store hosts without brackets (`::1`), add brackets only when building
-display URLs, and treat `::` like `0.0.0.0` at `src/proxy.js:88`.
-
-**Test:** connect through a proxy to a server bound on `::1`, skipped when the
-host has no IPv6 support. Update the parser assertions to the bracketless host.
 
 ### B7 — `--gateway <url>` is parsed as a target
 
@@ -804,8 +786,6 @@ This is the highest-value change and fixes B7 and B13.
 - Add `src/inspect.html` (or `src/inspect.js`): move the inline page out of the
   proxy. Read it once with `readFileSync(new URL(...))`; `files` already ships
   `src`.
-- Add `src/upstream.js`: `normalizeHost`, `isLoopback`, and `requestOptions` in
-  one place. This fixes B6 and B8 and keeps the TLS policy out of request code.
 - Add `test/headers.test.js` for the pure rewrites and keep the existing
   integration tests for the wire.
 
@@ -881,7 +861,6 @@ standalone cleanup branch that adds review load without reducing risk.
 ## Suggested PR order
 
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
-6. `fix(port): normalise IPv6 loopback targets` (B6)
 7. `refactor(cli): extract argument parsing and UI` (prep for B13)
 8. `fix(cli): reject unknown flags and extra targets` (B13)
 9. `fix(cloudflared): time out stalled downloads` (B9) and
@@ -936,3 +915,10 @@ Things found while fixing the items above. Newest last.
   HTTPS"). Node 26 reports a plain-HTTP server reached over TLS as `EPROTO`;
   older Node versions use `ERR_SSL_WRONG_VERSION_NUMBER`, which is also handled
   but untested.
+- B6 needed one small helper after all: `urlHost()` in `src/port.js` re-adds
+  brackets wherever a host is printed as a URL (dashboard, the `ready` event's
+  `target`, and the scheme hint). The `ready` event's `host` field is now the
+  bare address (`::1`); it was `[::1]` before, but that target never connected,
+  so no working consumer can depend on it.
+- `::` is treated like `0.0.0.0` and mapped to loopback (`::1`) in the proxy.
+  `parseTarget('[::]:3000')` was not covered by the old tests either.

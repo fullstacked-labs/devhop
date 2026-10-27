@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import tls from 'node:tls';
 import net from 'node:net';
+import { urlHost } from './port.js';
 
 const INSPECT_PAGE = `<!doctype html>
 <html lang="en">
@@ -85,7 +86,8 @@ export function createMasqueradeProxy({
   targetProtocol = 'http:',
   getPublicUrl = () => null
 }) {
-  const normalizedHost = targetHost === '0.0.0.0' ? '127.0.0.1' : targetHost;
+  // A wildcard bind address is not connectable everywhere; its loopback is.
+  const normalizedHost = { '0.0.0.0': '127.0.0.1', '::': '::1' }[targetHost] ?? targetHost;
   const upstreamIsHttps = targetProtocol === 'https:';
 
   function masqueradeRequestHeaders(req) {
@@ -159,7 +161,7 @@ export function createMasqueradeProxy({
   const TLS_MISMATCH_CODES = new Set(['EPROTO', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ECONNRESET']);
 
   function schemeHint(err) {
-    const target = `${normalizedHost}:${targetPort}`;
+    const target = `${urlHost(normalizedHost)}:${targetPort}`;
     if (upstreamIsHttps && TLS_MISMATCH_CODES.has(err?.code)) {
       return `devhop: TLS handshake with port ${targetPort} failed — the dev server may be plain HTTP. Try: npx devhop http://${target}`;
     }

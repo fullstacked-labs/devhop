@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createMasqueradeProxy } from '../src/proxy.js';
 import { startTunnel } from '../src/tunnel.js';
-import { isPortOpen, detectDevPorts, findFreePort, parseTarget } from '../src/port.js';
+import { isPortOpen, detectDevPorts, findFreePort, parseTarget, urlHost } from '../src/port.js';
 
 test('Inspector page is served by devhop while app responses stay byte-identical', async (t) => {
   const backendPort = await findFreePort();
@@ -241,8 +241,12 @@ test('parseTarget dynamically handles ports, hosts, URLs, and edge cases', () =>
   assert.deepStrictEqual(parseTarget('https://127.0.0.1:8443'), { port: 8443, host: '127.0.0.1', protocol: 'https:' });
   assert.deepStrictEqual(parseTarget('https://localhost'), { port: 443, host: 'localhost', protocol: 'https:' });
   assert.deepStrictEqual(parseTarget('http://127.0.0.1:3000/some/path'), { port: 3000, host: '127.0.0.1', protocol: 'http:' });
-  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
-  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '::1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '::1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('https://[::1]:8443'), { port: 8443, host: '::1', protocol: 'https:' });
+  assert.strictEqual(urlHost('::1'), '[::1]');
+  assert.strictEqual(urlHost('127.0.0.1'), '127.0.0.1');
+  assert.strictEqual(urlHost('localhost'), 'localhost');
 
   assert.strictEqual(parseTarget(''), null);
   assert.strictEqual(parseTarget('--no-qr'), null);
@@ -548,6 +552,29 @@ test('Proxy keeps the generic 502 when nothing is listening on the target', asyn
   assert.strictEqual(response.status, 502);
   assert.match(await response.text(), /Target server not responding/);
 });
+
+for (const alias of ['::1', '::']) {
+  test(`Proxy reaches a dev server bound to IPv6 loopback through target host ${alias}`, async (t) => {
+    const backend = http.createServer((req, res) => res.end('over ipv6'));
+    const bound = await new Promise((resolve) => {
+      backend.once('error', () => resolve(false));
+      backend.listen(0, '::1', () => resolve(true));
+    });
+    if (!bound) { t.skip('IPv6 loopback unavailable on this host'); return; }
+    const backendPort = backend.address().port;
+
+    const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetHost: alias });
+    await new Promise((resolve) => proxyServer.listen(0, '127.0.0.1', resolve));
+    t.after(() => {
+      backend.close();
+      proxyServer.close();
+    });
+
+    const response = await fetch(`http://127.0.0.1:${proxyServer.address().port}/`);
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(await response.text(), 'over ipv6');
+  });
+}
 
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');

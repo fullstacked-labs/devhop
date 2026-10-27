@@ -54,10 +54,17 @@ export function parseTarget(input) {
       port = parsed.protocol === 'https:' ? 443 : 80;
     }
     if (!(port > 0 && port <= 65535)) return null;
-    return { port, host: parsed.hostname || '127.0.0.1', protocol: hasProtocol ? parsed.protocol : (port === 443 ? 'https:' : 'http:') };
+    // URL hostnames keep IPv6 brackets, but sockets want the bare address.
+    const host = parsed.hostname.replace(/^\[|\]$/g, '') || '127.0.0.1';
+    return { port, host, protocol: hasProtocol ? parsed.protocol : (port === 443 ? 'https:' : 'http:') };
   } catch (_) {
     return null;
   }
+}
+
+// The form a host takes inside a URL: IPv6 addresses need brackets.
+export function urlHost(host) {
+  return host.includes(':') ? `[${host}]` : host;
 }
 
 export function findFreePort() {

@@ -1,7 +1,7 @@
 import qrcode from 'qrcode-terminal';
 import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
-import { detectDevPorts, findFreePort, parseTarget } from './port.js';
+import { detectDevPorts, findFreePort, parseTarget, urlHost } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { waitForEdge } from './edge.js';
 import { collectDiagnostics, formatDiagnostics } from './doctor.js';
@@ -173,7 +173,7 @@ export async function run(args = []) {
   const announce = (url, edgeReady) => {
     announced = true;
     if (isJson) {
-      emit({ event: 'ready', url, inspectUrl: `${url}/__devhop/inspect`, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${targetHost}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol, ...(edgeReady !== undefined && { edgeReady }) });
+      emit({ event: 'ready', url, inspectUrl: `${url}/__devhop/inspect`, target: `${targetProtocol === 'https:' ? 'https' : 'http'}://${urlHost(targetHost)}:${targetPort}`, port: targetPort, host: targetHost, protocol: targetProtocol, ...(edgeReady !== undefined && { edgeReady }) });
     } else {
       renderDashboard();
     }
@@ -235,7 +235,7 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   console.log('');
   console.log(pc.bold(pc.bgCyan(pc.black(' 🐇 DEVHOP '))));
   console.log('');
-  console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${targetHost}:${targetPort}`)}`);
+  console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${urlHost(targetHost)}:${targetPort}`)}`);
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);
   console.log(`  ${pc.yellow('⚠ Public link — anyone with it can open your dev server. Ctrl+C when done.')}`);
   if (edgeSlow) {
