@@ -116,7 +116,7 @@ npx devhop --doctor          Print diagnostics for bug reports
 {"event":"error","code":"NO_DEV_SERVER","message":"No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000."}
 ```
 
-Error codes: `INVALID_ARGUMENT`, `INVALID_TARGET`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `UNCAUGHT`. Machine-readable summary: [`llms.txt`](./llms.txt).
+Error codes: `INVALID_ARGUMENT`, `INVALID_TARGET`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `PROXY_START_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `UNCAUGHT`. Machine-readable summary: [`llms.txt`](./llms.txt).
 
 ### cloudflared
 

@@ -16,7 +16,6 @@ item once its fix lands, or mark it done with a link to the commit.
 
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
-| B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 
 ### Gateway (quarantined)
 
@@ -55,21 +54,6 @@ items change runtime behaviour by itself; they are what makes the behaviour
 fixes expensive to review.
 
 ## Shipping path
-
-### B10 — free-port race and unhandled `listen` error
-
-**Where:** `src/cli.js:136-151`, `src/port.js:63-71`
-
-`findFreePort()` closes its probe socket, then the proxy binds later. Another
-process can take the port in between. `server.listen` also has no `'error'`
-listener, so `EADDRINUSE` becomes an uncaught event/stack trace.
-
-**Fix:** call `server.listen(0, '127.0.0.1')` and read
-`server.address().port`. That removes the race and one async step. Keep
-`findFreePort` for tests and the smoke fixtures.
-
-**Test:** start the proxy twice; the second must either get a different port
-or a clean error, never an uncaught event.
 
 ## Gateway (quarantined)
 
@@ -340,7 +324,7 @@ handler and the tunnel callbacks; each needs cleanup to run first, so they do
 not fit `fail()`.
 
 **Fix:** extract the lifecycle (proxy, tunnel, cleanup) into its own module
-only if B10 makes `run()` hard to change; otherwise leave it.
+only if it becomes hard to change; otherwise leave it.
 
 #### S3 — `#handleRegister()` mixes six policies
 
@@ -672,8 +656,7 @@ standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-1. `fix(cli): bind the proxy on an OS-assigned port` (B10)
-2. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
+1. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
    release
 
 ## Open decisions
@@ -794,3 +777,8 @@ Things found while fixing the items above. Newest last.
 - The tunnel and CLI stubs that ignore SIGTERM are node scripts with a
   `#!/usr/bin/env node` shebang, so they need a POSIX `env`; the tests skip on
   Windows like the other stub tests.
+- B10 added one error code, `PROXY_START_FAILED`, for a `listen(0)` failure. That
+  path is untested: with port 0 it needs something like an exhausted file
+  descriptor limit to trigger. The race itself cannot be reproduced in a test,
+  so the new test only asserts that the port handed to cloudflared is open.
+  `findFreePort()` is now used only by tests and the smoke fixtures.

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isPortOpen } from '../src/port.js';
 
 async function runStubbed(args) {
   const { run } = await import('../src/cli.js');
@@ -58,15 +59,16 @@ test('without --json the invalid-target error prints no JSON on stdout', async (
   assert.deepEqual(stdout, []);
 });
 
-test('SIGTERM leaves no cloudflared behind, even one that ignores SIGTERM', async (t) => {
-  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-quit-'));
+// Runs `devhop 9 --json` against a cloudflared stub that records its argv and
+// ignores SIGTERM, and waits until the stub is up.
+async function startDevhopWithStub(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-cli-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const pidFile = path.join(dir, 'pid');
+  const stateFile = path.join(dir, 'state.json');
   const stub = path.join(dir, 'fake-cloudflared');
   fs.writeFileSync(stub, [
     '#!/usr/bin/env node',
-    `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    `require('fs').writeFileSync(${JSON.stringify(stateFile)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2) }));`,
     "process.on('SIGTERM', () => {});",
     'setInterval(() => {}, 1000);',
   ].join('\n'));
@@ -76,22 +78,38 @@ test('SIGTERM leaves no cloudflared behind, even one that ignores SIGTERM', asyn
     env: { ...process.env, DEVHOP_CLOUDFLARED: stub },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
+  t.after(() => devhop.kill('SIGKILL'));
   let stdout = '';
   devhop.stdout.on('data', (chunk) => { stdout += chunk; });
-  const stubPid = await new Promise((resolve, reject) => {
+  const state = await new Promise((resolve, reject) => {
     const started = Date.now();
     const poll = setInterval(() => {
-      const pid = fs.existsSync(pidFile) && Number(fs.readFileSync(pidFile, 'utf8'));
-      if (pid) { clearInterval(poll); resolve(pid); }
+      const raw = fs.existsSync(stateFile) && fs.readFileSync(stateFile, 'utf8');
+      if (raw) { clearInterval(poll); resolve(JSON.parse(raw)); }
       else if (Date.now() - started > 5000) { clearInterval(poll); reject(new Error('cloudflared stub never started')); }
     }, 20);
   });
-  t.after(() => { try { process.kill(stubPid, 'SIGKILL'); } catch (_) {} });
+  t.after(() => { try { process.kill(state.pid, 'SIGKILL'); } catch (_) {} });
+  return { devhop, state, output: () => stdout };
+}
+
+test('devhop hands cloudflared the port its proxy is listening on', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const { state } = await startDevhopWithStub(t);
+
+  const url = new URL(state.argv[state.argv.indexOf('--url') + 1]);
+  assert.equal(url.hostname, '127.0.0.1');
+  assert.equal(await isPortOpen(Number(url.port)), true);
+});
+
+test('SIGTERM leaves no cloudflared behind, even one that ignores SIGTERM', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const { devhop, state, output } = await startDevhopWithStub(t);
 
   const exited = new Promise((resolve) => devhop.once('exit', resolve));
   devhop.kill('SIGTERM');
 
   assert.equal(await exited, 0);
-  assert.throws(() => process.kill(stubPid, 0), { code: 'ESRCH' }, 'cloudflared must be gone when devhop exits');
-  assert.equal(JSON.parse(stdout.trim()).event, 'closed');
+  assert.throws(() => process.kill(state.pid, 0), { code: 'ESRCH' }, 'cloudflared must be gone when devhop exits');
+  assert.equal(JSON.parse(output().trim()).event, 'closed');
 });

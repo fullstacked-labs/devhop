@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
-import { detectDevPorts, findFreePort, urlHost } from './port.js';
+import { detectDevPorts, urlHost } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { waitForEdge } from './edge.js';
 import { collectDiagnostics, formatDiagnostics } from './doctor.js';
@@ -93,8 +93,6 @@ export async function run(args = []) {
     if (!isJson) throw err;
     process.exit(1);
   }
-  // Pick an ephemeral local proxy port
-  const proxyPort = await findFreePort();
 
   let publicUrl = null;
   let edgeLocation = null;
@@ -109,7 +107,25 @@ export async function run(args = []) {
     getPublicUrl: () => publicUrl
   });
 
-  await new Promise((resolve) => server.listen(proxyPort, '127.0.0.1', resolve));
+  // Let the OS pick the port: probing for a free one first leaves a window for
+  // another process to take it before the proxy binds.
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+  } catch (err) {
+    fail({
+      json: isJson,
+      code: 'PROXY_START_FAILED',
+      message: `Could not start the local proxy: ${err.message}`,
+      hint: 'Check for a process limit or a firewall rule blocking local sockets, then run devhop again.',
+    });
+  }
+  const proxyPort = server.address().port;
 
   if (!isJson) {
     console.log(`${pc.dim('  Local masquerade proxy ready on port ' + proxyPort)}`);
