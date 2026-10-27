@@ -14,13 +14,16 @@ that rewrites Host/Origin/Referer so dev servers treat the phone as localhost.
   its SHA-256. Bump the pin with `node scripts/bump-cloudflared.js [version]`.
 - `src/doctor.js`: `--doctor` diagnostics.
 - `src/port.js`: target parsing and dev-port detection.
-- `src/gateway/`: experimental self-hosted relay transport (`--gateway`).
-  Hidden from `--help` and the README on purpose; keep it that way until the
-  relay ships as a supported feature.
-- `test/`: `node:test` suites; `npm test` runs everything under it.
+- `experimental/gateway/`: the self-hosted relay transport, quarantined. It is
+  not wired into the CLI and not published; fix [`REFACTOR.md`](./REFACTOR.md)
+  G1–G2 before moving it back to `src/`. Revival steps: Phase 5.
+- `test/`: `node:test` suites; `npm test` runs every `*.test.js` in the repo,
+  including the quarantined gateway tests under `experimental/gateway/test/`.
 - `smoke/`: framework smoke matrix (`node smoke/run.js <fixture>`) and the
   real-tunnel canary; see `smoke/README.md`. Not part of `npm test`.
 - `scripts/`: release helpers (`release-notes.js`, `bump-cloudflared.js`).
+- [`REFACTOR.md`](./REFACTOR.md): audited defects and the refactor plan. Read it
+  before structural work; remove an item when its fix lands.
 - `skills/devhop/SKILL.md`, `llms.txt`: docs for coding agents. Keep them in
   sync with the CLI. The `--json` events and error codes are public API: add
   fields, don't rename or remove them.
@@ -65,9 +68,9 @@ devhop has to read as written by someone who cares. Specifically:
 
 - `src/proxy.js` WebSocket upgrades: the raw socket replay waits for the
   upstream status line before piping. A non-101 is forwarded and closed.
-- `src/gateway/relay.js`: after Host routing, the ingress socket is detached
-  from Node's HTTP parser, which would otherwise swallow bytes pipelined
-  behind an upgrade request.
+- `experimental/gateway/src/relay.js`: after Host routing, the ingress socket
+  is detached from Node's HTTP parser, which would otherwise swallow bytes
+  pipelined behind an upgrade request.
 - Upgraded client sockets emit `'end'` on FIN as well as `'close'`; teardown
   listens to both or a half-closed peer leaks a binding.
 - `src/tunnel.js` retries quick-tunnel creation once: first-run failures are

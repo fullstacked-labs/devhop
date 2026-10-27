@@ -1,4 +1,4 @@
-# 🦘 devhop
+# 🐇 devhop
 
 [![npm version](https://img.shields.io/npm/v/devhop.svg)](https://www.npmjs.com/package/devhop)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -26,7 +26,7 @@ npx devhop [port]
 ```
 
 ```text
- 🦘 DEVHOP 
+ 🐇 DEVHOP 
 
   Target:       http://localhost:3000
   Mobile URL:   https://breeze-sunset-vintage-glade.trycloudflare.com

@@ -8,7 +8,7 @@ import {
   encodeFrame,
   decodeFrames,
   FrameDecoder,
-} from '../../src/gateway/frames.js';
+} from '../src/frames.js';
 
 const ALL_TYPES = Object.values(FRAME);
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+- The hidden `--gateway` transport. It was experimental, and its relay dropped
+  request bodies and refused phone WebSocket upgrades (`REFACTOR.md` G1–G2).
+  The code and tests are quarantined under `experimental/gateway/`; the flag now
+  exits with a `GATEWAY_UNAVAILABLE` error.
+
 ## 0.2.0
 
 ### Breaking

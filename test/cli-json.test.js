@@ -29,10 +29,10 @@ test('--json reports an invalid target as one error event', async () => {
   assert.ok(event.message.length > 0);
 });
 
-test('--json reports an invalid gateway URL as one error event', async () => {
-  const stdout = await runStubbed(['3000', '--json', '--gateway', 'nope']);
+test('--json reports the quarantined gateway flag as one error event', async () => {
+  const stdout = await runStubbed(['3000', '--json', '--gateway', 'wss://relay.example.com']);
   assert.equal(stdout.length, 1);
-  assert.equal(JSON.parse(stdout[0]).code, 'INVALID_GATEWAY_URL');
+  assert.equal(JSON.parse(stdout[0]).code, 'GATEWAY_UNAVAILABLE');
 });
 
 test('without --json the invalid-target error prints no JSON on stdout', async () => {

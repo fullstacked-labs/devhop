@@ -4,7 +4,6 @@ import { createMasqueradeProxy } from './proxy.js';
 import { detectDevPorts, findFreePort, parseTarget } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { waitForEdge } from './edge.js';
-import { startGateway } from './gateway/client.js';
 import { collectDiagnostics, formatDiagnostics } from './doctor.js';
 import { createRequire } from 'node:module';
 
@@ -12,7 +11,7 @@ const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 
 export function printHelp() {
   console.log(`
-${pc.bold(pc.cyan('🦘 devhop'))} ${pc.dim(`v${VERSION}`)}
+${pc.bold(pc.cyan('🐇 devhop'))} ${pc.dim(`v${VERSION}`)}
 ${pc.dim('Hop local web dev servers onto mobile devices with zero config.')}
 
 ${pc.bold('Usage:')}
@@ -57,20 +56,14 @@ export async function run(args = []) {
   const emit = (obj) => { if (isJson) console.log(JSON.stringify(obj)); };
   const showQr = !args.includes('--no-qr') && !isJson;
   const protocol = args.includes('--http2') ? 'http2' : undefined;
-  const gatewayIdx = args.findIndex((a) => a === '--gateway' || a.startsWith('--gateway='));
-  let gatewayUrl = null;
-  if (gatewayIdx !== -1) {
-    gatewayUrl = args[gatewayIdx].startsWith('--gateway=') ? args[gatewayIdx].slice(10) : args[gatewayIdx + 1];
-    // ws:// is for local/test relays, wss:// for real ones.
-    if (!gatewayUrl || gatewayUrl.startsWith('-') || !/^wss?:\/\//.test(gatewayUrl)) {
-      emit({ event: 'error', code: 'INVALID_GATEWAY_URL', message: `Invalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.` });
-      console.error(pc.red(`\nInvalid gateway URL: "${gatewayUrl}" — expected ws://host:port or wss://host.`));
-      console.error(`Example: ${pc.cyan('devhop --gateway wss://relay.example.com')}\n`);
-      process.exit(1);
-    }
-    if (!isJson) {
-      console.error(pc.yellow('! --gateway is experimental: the wire protocol may change without notice.'));
-    }
+  // The relay transport is quarantined in experimental/gateway/. Fail loudly
+  // instead of letting the URL fall through to target detection.
+  if (args.some((a) => a === '--gateway' || a.startsWith('--gateway='))) {
+    const message = '--gateway is not available in this build; the relay transport is quarantined under experimental/gateway/.';
+    emit({ event: 'error', code: 'GATEWAY_UNAVAILABLE', message });
+    console.error(pc.red(`\n${message}`));
+    console.error(`Example: ${pc.cyan('npx devhop 3000')}\n`);
+    process.exit(1);
   }
   let targetPort = null;
   let targetHost = '127.0.0.1';
@@ -119,18 +112,15 @@ export async function run(args = []) {
 
   if (!isJson) console.log(`\n${pc.cyan('●')} Initializing ${pc.bold('devhop')} for port ${pc.bold(targetPort)}...`);
 
-  // Gateway mode doesn't use cloudflared, so skip the download.
-  let binPath = null;
-  if (!gatewayUrl) {
-    try {
-      binPath = await ensureBinary((msg) => {
-        if (!isJson) console.log(`${pc.dim('  ' + msg)}`);
-      });
-    } catch (err) {
-      emit({ event: 'error', code: 'CLOUDFLARED_INSTALL_FAILED', message: err.message });
-      if (!isJson) throw err;
-      process.exit(1);
-    }
+  let binPath;
+  try {
+    binPath = await ensureBinary((msg) => {
+      if (!isJson) console.log(`${pc.dim('  ' + msg)}`);
+    });
+  } catch (err) {
+    emit({ event: 'error', code: 'CLOUDFLARED_INSTALL_FAILED', message: err.message });
+    if (!isJson) throw err;
+    process.exit(1);
   }
   // Pick an ephemeral local proxy port
   const proxyPort = await findFreePort();
@@ -188,86 +178,52 @@ export async function run(args = []) {
       renderDashboard();
     }
   };
-  const callbacks = {
-    onUrl: (url) => {
+  tunnelHandle = startTunnel({
+    localPort: proxyPort,
+    binPath,
+    protocol,
+    onLocation: (loc) => {
+      if (loc !== edgeLocation) {
+        edgeLocation = loc;
+        if (announced && !isJson) renderDashboard();
+      }
+    },
+    // A fresh quick tunnel answers 530 for a few seconds after cloudflared
+    // prints its URL; announcing earlier sends the first scan to an error page.
+    onUrl: async (url) => {
       publicUrl = url;
-      announce(url);
+      if (!isJson) console.log(pc.dim('  Waiting for Cloudflare edge...'));
+      const edge = await waitForEdge(url);
+      if (cleanedUp) return;
+      edgeSlow = !edge.ready;
+      announce(url, edge.ready);
     },
     onRetry: (attempt) => {
-      emit({ event: 'reconnecting', ...(typeof attempt === 'number' && { attempt }) });
-      if (!isJson) console.log(pc.yellow('↻ Tunnel dropped — reconnecting...'));
+      emit({ event: 'reconnecting', attempt });
+      if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
     },
     onError: (err) => {
-      emit({ event: 'error', code: 'GATEWAY_FAILED', message: err.message });
-      console.error(pc.red(`\nTunnel failed: ${err.message}`));
+      emit({ event: 'error', code: 'TUNNEL_START_FAILED', message: err.message });
+      console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
       cleanup();
       process.exit(1);
     },
-    onClose: () => {
+    onClose: (code, details) => {
       if (!cleanedUp) {
-        emit({ event: 'error', code: 'GATEWAY_FAILED', message: 'Gateway connection closed.' });
+        const isError = (code !== 0 && code !== null) || (!details?.urlFound);
+        if (isError) {
+          const exitDesc = code !== null ? `code ${code}` : `signal ${details?.signal || 'UNKNOWN'}`;
+          emit({ event: 'error', code: 'TUNNEL_EXITED', message: `cloudflared exited unexpectedly (${exitDesc})` });
+          console.error(pc.red(`\ncloudflared exited unexpectedly (${exitDesc}):`));
+          if (details?.recentOutput) {
+            console.error(pc.dim(details.recentOutput.split('\n').map((l) => '  > ' + l).join('\n')));
+          }
+        }
         cleanup();
-        process.exit(1);
+        process.exit(typeof code === 'number' && code !== 0 ? code : (isError ? 1 : 0));
       }
     }
-  };
-  if (gatewayUrl) {
-    tunnelHandle = startGateway({
-      localPort: proxyPort,
-      gatewayUrl,
-      urlTemplate: `https://<sub>.${new URL(gatewayUrl).hostname}`,
-      token: process.env.DEVHOP_GATEWAY_TOKEN || '',
-      ...callbacks
-    });
-  } else {
-    tunnelHandle = startTunnel({
-      localPort: proxyPort,
-      binPath,
-      protocol,
-      onLocation: (loc) => {
-        if (loc !== edgeLocation) {
-          edgeLocation = loc;
-          if (announced && !isJson) renderDashboard();
-        }
-      },
-      ...callbacks,
-      // A fresh quick tunnel answers 530 for a few seconds after cloudflared
-      // prints its URL; announcing earlier sends the first scan to an error page.
-      onUrl: async (url) => {
-        publicUrl = url;
-        if (!isJson) console.log(pc.dim('  Waiting for Cloudflare edge...'));
-        const edge = await waitForEdge(url);
-        if (cleanedUp) return;
-        edgeSlow = !edge.ready;
-        announce(url, edge.ready);
-      },
-      onRetry: (attempt) => {
-        emit({ event: 'reconnecting', attempt });
-        if (!isJson) console.log(pc.yellow('↻ Quick-tunnel setup failed — retrying once in 2s...'));
-      },
-      onError: (err) => {
-        emit({ event: 'error', code: 'TUNNEL_START_FAILED', message: err.message });
-        console.error(pc.red(`\nFailed to start cloudflared: ${err.message}`));
-        cleanup();
-        process.exit(1);
-      },
-      onClose: (code, details) => {
-        if (!cleanedUp) {
-          const isError = (code !== 0 && code !== null) || (!details?.urlFound);
-          if (isError) {
-            const exitDesc = code !== null ? `code ${code}` : `signal ${details?.signal || 'UNKNOWN'}`;
-            emit({ event: 'error', code: 'TUNNEL_EXITED', message: `cloudflared exited unexpectedly (${exitDesc})` });
-            console.error(pc.red(`\ncloudflared exited unexpectedly (${exitDesc}):`));
-            if (details?.recentOutput) {
-              console.error(pc.dim(details.recentOutput.split('\n').map((l) => '  > ' + l).join('\n')));
-            }
-          }
-          cleanup();
-          process.exit(typeof code === 'number' && code !== 0 ? code : (isError ? 1 : 0));
-        }
-      }
-    });
-  }
+  });
 }
 
 function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, edgeLocation, edgeSlow) {
@@ -277,7 +233,7 @@ function displayDashboard(url, targetPort, targetHost, targetProtocol, showQr, e
   const iata = edgeLocation && /^([A-Z]{3})\d{1,2}$/.test(edgeLocation) ? edgeLocation.slice(0, 3) : edgeLocation;
   console.clear();
   console.log('');
-  console.log(pc.bold(pc.bgCyan(pc.black(' 🦘 DEVHOP '))));
+  console.log(pc.bold(pc.bgCyan(pc.black(' 🐇 DEVHOP '))));
   console.log('');
   console.log(`  ${pc.bold('Target:')}       ${pc.green(`${scheme}://${targetHost}:${targetPort}`)}`);
   console.log(`  ${pc.bold('Mobile URL:')}   ${pc.bold(pc.underline(pc.cyan(url)))}`);

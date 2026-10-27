@@ -15,8 +15,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
-import { Relay } from '../../src/gateway/relay.js';
-import { startGateway } from '../../src/gateway/client.js';
+import { Relay } from '../src/relay.js';
+import { startGateway } from '../src/client.js';
 
 const SALT = 'cable-pull-salt';
 const GRACE_MS = 300;
