@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+- The tunnel URL and edge location are recognised when cloudflared's output is split mid-line; before, devhop could stay connected without ever showing the URL.
+- When a phone disconnects mid-response (SSE, HMR, a large download), devhop now closes its request to the dev server instead of leaving the stream open.
+- A refused WebSocket upgrade now forwards the dev server's response body, not just its headers.
+- A wrong target scheme now gets the promised hint: `https:` pointing at a plain-HTTP server suggests `http://`, and `http:` pointing at a TLS server suggests `https://`.
+- IPv6 targets such as `[::1]:3000` connect; the brackets were being kept in the host name. `::` is treated like `0.0.0.0`.
+- The cloudflared download gives up after 30 seconds without data and says what to check, instead of hanging.
+- `--doctor` reports a missing `DEVHOP_CLOUDFLARED` path instead of saying cloudflared "isn't downloaded yet".
+- Failing to delete an old cloudflared version no longer fails an install that succeeded.
+- The README demo images load on the npm page.
+
+### Changed
+- The README and `llms.txt` now say that upstream HTTPS certificates are not verified for any host, so self-signed certificates work; point devhop only at servers you trust.
+
 ### Removed
 - The hidden `--gateway` transport. It was experimental, and its relay dropped
   request bodies and refused phone WebSocket upgrades (`REFACTOR.md` G1–G2).

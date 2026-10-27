@@ -1,12 +1,12 @@
 # Refactor notes
 
-Audit of devhop 0.2.0 on 2026-10-27. The gateway quarantine (Phase 5) landed
-the same day; everything else is open. This is a backlog for structural work,
+Audit of devhop 0.2.0 on 2026-10-27. The gateway quarantine (Phase 5) and the
+0.2.1 bug batch (B1, B3–B6, B8, B9, B11, B12, B16) landed the same day and were
+removed from this file; the rest is open. This is a backlog for structural work,
 not a changelog. The IDs (`B1`, `G3`, `S1`) are for commit messages and issues;
 the `D`/`S`/`A` items are code quality, not behaviour.
 
-`npm test` was 96/96 green when this was written, so every item below is outside
-the current suite. "Reproduced" means a throwaway script showed the behaviour;
+`npm test` is 111/111 green, so every item below is outside the current suite. "Reproduced" means a throwaway script showed the behaviour;
 "inspection" means the code path is clear but no test covers it yet. Remove an
 item once its fix lands, or mark it done with a link to the commit.
 
@@ -775,16 +775,16 @@ standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
-7. `refactor(cli): extract argument parsing and UI` (prep for B13)
-8. `fix(cli): reject unknown flags and extra targets` (B13)
-10. `test: split suites and add regression helpers` (Phase 4)
-11. Gateway quarantine (Phase 5, done 2026-10-27)
+1. `refactor(cli): extract argument parsing and UI` (prep for B13, B2, B15)
+2. `fix(cli): reject unknown flags and extra targets` (B13)
+3. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
+   `close()`)
+4. `fix(cli): let the event loop drain before exiting` (B15), with B10
+   (`listen(0)` on the proxy) riding along
+5. `test: split suites and add regression helpers` (Phase 4)
 
-Steps 1–6 are small, each has a reproduction, and none need a design decision.
-Step 7 pays for every later PR. B10 and B15 can ride along with the
-files they touch. Step 2 needs `quit()` to await `close()`, so it lands with
-or after step 7.
+Step 1 pays for every later PR, and step 3 needs `quit()` to await `close()`, so
+it lands with or after step 1.
 
 ## Open decisions
 
@@ -865,3 +865,9 @@ Things found while fixing the items above. Newest last.
   checks. It parses `src`, `srcset` and `![](…)` references only; a relative
   `<a href>` to a file outside `files` (the badge links to `./skills/…`, which
   does ship) is not checked.
+- `CHANGELOG.md`'s Unreleased section also holds the `--gateway` removal from the
+  quarantine. That flag was hidden and experimental, so a patch release is
+  defensible, but a reader of 0.2.1's notes will see a "Removed" entry.
+- Nothing from this pass is pushed or tagged. Releases go through the tag
+  workflow only.
+
