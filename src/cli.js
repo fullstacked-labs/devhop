@@ -116,18 +116,24 @@ export async function run(args = []) {
     console.log(`${pc.cyan('●')} Connecting secure tunnel to Cloudflare Edge...`);
   }
   let cleanedUp = false;
-  let exitingClean = false;
   let tunnelHandle = null;
+  let tunnelClosed = Promise.resolve();
 
   const cleanup = () => {
-    if (cleanedUp) return;
+    if (cleanedUp) return tunnelClosed;
     cleanedUp = true;
-    if (tunnelHandle) tunnelHandle.close();
+    if (tunnelHandle) tunnelClosed = tunnelHandle.close();
     try { server.close(); } catch (_) {}
     if (!isJson) console.log(`\n${pc.yellow('✔')} Tunnel disconnected. Cleaned up.\n`);
-    if (exitingClean) emit({ event: 'closed' });
+    return tunnelClosed;
   };
-  const quit = () => { exitingClean = true; cleanup(); process.exit(0); };
+  // Exit only after cloudflared is gone: process.exit would cancel the SIGKILL
+  // fallback, and a cloudflared that ignores SIGTERM would be left running.
+  const quit = async () => {
+    await cleanup();
+    emit({ event: 'closed' });
+    process.exit(0);
+  };
   const renderDashboard = () => {
     displayDashboard(publicUrl, targetPort, targetHost, targetProtocol, showQr, edgeLocation, edgeSlow);
   };

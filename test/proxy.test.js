@@ -607,6 +607,51 @@ test('Cache cleanup does not throw when an old version cannot be deleted', async
   assert.ok(fs.existsSync(path.join(root, '2020.1.1')));
 });
 
+test('Tunnel close() resolves only after a cloudflared that ignores SIGTERM is killed', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-term-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pidFile = path.join(dir, 'pid');
+  const stub = path.join(dir, 'fake-cloudflared');
+  fs.writeFileSync(stub, [
+    '#!/usr/bin/env node',
+    `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    "process.on('SIGTERM', () => {});",
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  fs.chmodSync(stub, '755');
+
+  const handle = startTunnel({ localPort: 3000, binPath: stub, onClose: () => {} });
+  const started = Date.now();
+  while (!fs.existsSync(pidFile) || !fs.readFileSync(pidFile, 'utf8')) {
+    assert.ok(Date.now() - started < 5000, 'stub never started');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch (_) {} });
+
+  await handle.close();
+
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'cloudflared must be gone when close() resolves');
+});
+
+test('Tunnel close() resolves when cloudflared could not be started', async () => {
+  let startError = null;
+  const handle = startTunnel({
+    localPort: 3000,
+    binPath: path.join(os.tmpdir(), 'devhop-no-such-cloudflared'),
+    onError: (err) => { startError = err; },
+    onClose: () => {},
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(startError, 'expected a spawn error');
+
+  await Promise.race([
+    handle.close(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('close() did not resolve after a failed spawn')), 2000)),
+  ]);
+});
+
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');
   if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }

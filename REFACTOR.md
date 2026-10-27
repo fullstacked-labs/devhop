@@ -16,7 +16,6 @@ item once its fix lands, or mark it done with a link to the commit.
 
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
-| B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 
 ### Gateway (quarantined)
@@ -56,29 +55,6 @@ items change runtime behaviour by itself; they are what makes the behaviour
 fixes expensive to review.
 
 ## Shipping path
-
-### B2 — the SIGKILL fallback never fires
-
-**Where:** `src/tunnel.js:146-157`
-
-`child.kill('SIGTERM')` sets `child.killed = true` immediately. The 500 ms
-check `if (!current.killed)` therefore never sends SIGKILL.
-
-**Repro:** a stub that ignores SIGTERM was still alive 400 ms after `close()`;
-the process had to be killed by hand. A cloudflared that hangs on shutdown
-outlives the terminal that reported a clean exit.
-
-Fixing the check alone does not help the CLI: `quit()` in `src/cli.js` calls
-`process.exit(0)` right after `cleanup()`, so the 500 ms timer never runs. A
-correct SIGKILL timer followed by `process.exit(0)` still left the stub alive.
-
-**Fix:** check `current.exitCode === null && current.signalCode === null`, and
-make `close()` return a promise that resolves on the child's `exit` (after
-escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
-
-**Test:** a stub traps SIGTERM and stays alive; `close()` must resolve with the
-stub dead within the fallback window, including when the caller exits right
-after awaiting it.
 
 ### B10 — free-port race and unhandled `listen` error
 
@@ -364,7 +340,7 @@ handler and the tunnel callbacks; each needs cleanup to run first, so they do
 not fit `fail()`.
 
 **Fix:** extract the lifecycle (proxy, tunnel, cleanup) into its own module
-only if B2 or B10 make `run()` hard to change; otherwise leave it.
+only if B10 makes `run()` hard to change; otherwise leave it.
 
 #### S3 — `#handleRegister()` mixes six policies
 
@@ -618,12 +594,6 @@ pile of closures.
 
 ## Refactor plan
 
-### Phase 1 — put a boundary around CLI arguments
-
-Landed: `src/args.js`, `src/ui.js`, `fail()`, `test/args.test.js` and the strict
-parser (B13). What is left is making `quit()` await `tunnelHandle.close()`
-(B2).
-
 ### Phase 2 — separate proxy decisions from sockets
 
 - Add `src/headers.js` (or `src/proxy/headers.js`): pure
@@ -641,8 +611,6 @@ parser (B13). What is left is making `quit()` await `tunnelHandle.close()`
 - `startTunnel({ spawnImpl = spawn, ... })`: tests inject a fake child instead
   of `/bin/sh` and `sleep`. This removes the Windows skips and most of the
   suite's wall-clock time.
-- Fix `close()` escalation with an `exit` listener and an exit-code check
-  (B2).
 
 ### Phase 4 — split the tests by module
 
@@ -697,17 +665,15 @@ to the quick-tunnel path.
 - Keep `AGENTS.md`'s "Behaviour that looks simplifiable but isn't" section in
   view while working; it documents choices the audit did not flag.
 
-The D/S/A items are not a separate project. S2 is Phase 1; S1, S3, S4, S5 and
+The D/S/A items are not a separate project. S2 is mostly done; S1, S3, S4, S5 and
 A4 are Phase 5; S6, A5 and A6 are Phase 4. D1–D5, A1–A2 and A7–A8 are
 janitorial: fix them in the PR that already touches the file, not in a
 standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-1. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
-   `close()`)
-2. `fix(cli): bind the proxy on an OS-assigned port` (B10)
-3. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
+1. `fix(cli): bind the proxy on an OS-assigned port` (B10)
+2. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
    release
 
 ## Open decisions
@@ -814,3 +780,17 @@ Things found while fixing the items above. Newest last.
   helper, which nothing else needs yet.
 - `GATEWAY_UNAVAILABLE` is emitted but is not in the README's list of error
   codes, because the flag was never documented.
+- `startTunnel().close()` now returns a promise that resolves when cloudflared
+  has exited (SIGTERM, then SIGKILL after 500 ms). `quit()` awaits it, so a
+  SIGTERM to devhop takes about half a second when cloudflared ignores SIGTERM.
+  The `uncaughtException` and `onError` paths still call `cleanup()` and exit
+  without awaiting it, so a crash can still leave a SIGTERM-ignoring
+  cloudflared behind.
+- The `closed` JSON event moved after the wait, so it now means cloudflared is
+  gone. The "Tunnel disconnected" line still prints when the signal arrives.
+- Ctrl+C in a terminal also delivers SIGINT to cloudflared directly (same
+  process group), so B2 mostly matters for SIGTERM and SIGHUP, such as a closed
+  terminal or a supervisor. This is reasoning, not something I tested.
+- The tunnel and CLI stubs that ignore SIGTERM are node scripts with a
+  `#!/usr/bin/env node` shebang, so they need a POSIX `env`; the tests skip on
+  Windows like the other stub tests.

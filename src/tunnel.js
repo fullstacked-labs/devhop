@@ -82,6 +82,8 @@ export function removeOldVersions(cacheRoot) {
 // Quick-tunnel creation fails intermittently; one retry fixes most first-run failures.
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2000;
+// How long cloudflared gets to exit after SIGTERM before it is killed.
+const KILL_GRACE_MS = 500;
 
 export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, onError, onClose, onRetry }) {
   const tunnelArgs = ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${localPort}`];
@@ -147,17 +149,24 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
   launch();
 
   return {
-    close: () => {
+    // Resolves once cloudflared has exited. A caller that exits right after
+    // close() would cancel a SIGKILL timer, so it has to wait for this.
+    close: () => new Promise((resolve) => {
       manualClose = true;
-      try {
-        current.kill('SIGTERM');
-        // SIGKILL fallback: cloudflared must not outlive devhop if it ignores SIGTERM.
-        setTimeout(() => {
-          try {
-            if (!current.killed) current.kill('SIGKILL');
-          } catch (_) {}
-        }, 500);
-      } catch (_) {}
-    }
+      const child = current;
+      // No pid means the spawn itself failed, so no 'exit' event will come.
+      if (!child || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const killTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch (_) {}
+      }, KILL_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(killTimer);
+        resolve();
+      });
+      try { child.kill('SIGTERM'); } catch (_) {}
+    })
   };
 }
