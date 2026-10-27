@@ -37,9 +37,14 @@ export async function collectDiagnostics() {
 }
 
 export function formatDiagnostics(d) {
-  const cloudflared = d.cloudflared.cached
-    ? `${d.cloudflared.path}${d.cloudflared.override ? ' (DEVHOP_CLOUDFLARED)' : ''}${d.cloudflared.version ? ` — ${d.cloudflared.version}` : ''}`
-    : 'cloudflared not downloaded yet (downloads on first run)';
+  let cloudflared;
+  if (d.cloudflared.cached) {
+    cloudflared = `${d.cloudflared.path}${d.cloudflared.override ? ' (DEVHOP_CLOUDFLARED)' : ''}${d.cloudflared.version ? ` — ${d.cloudflared.version}` : ''}`;
+  } else if (d.cloudflared.override) {
+    cloudflared = `${d.cloudflared.path} (DEVHOP_CLOUDFLARED) — file not found; unset it or point it at a cloudflared binary`;
+  } else {
+    cloudflared = 'cloudflared not downloaded yet (downloads on first run)';
+  }
   return [
     '```',
     `devhop      ${d.devhop}`,

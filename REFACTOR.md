@@ -19,7 +19,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
-| B11 | `src/doctor.js` misreports a missing `DEVHOP_CLOUDFLARED` | low | reproduced |
 | B12 | `src/tunnel.js` cache cleanup can fail a good install | low | inspection |
 | B13 | `src/cli.js` ignores unknown flags and extra targets | low | inspection |
 | B15 | `--json` events can be lost on `process.exit` | low | reproduced only with a stalled reader |
@@ -122,23 +121,6 @@ listener, so `EADDRINUSE` becomes an uncaught event/stack trace.
 
 **Test:** start the proxy twice; the second must either get a different port
 or a clean error, never an uncaught event.
-
-### B11 — doctor misreports a missing `DEVHOP_CLOUDFLARED`
-
-**Where:** `src/doctor.js:40-42`
-
-`cached: false` is formatted as "cloudflared not downloaded yet (downloads on
-first run)", even when the override points at a path that does not exist.
-
-**Repro:** `DEVHOP_CLOUDFLARED=/nonexistent/cloudflared node bin/devhop.js
---doctor` printed the "not downloaded yet" message. `ensureBinary` will throw
-instead.
-
-**Fix:** when `override` is true, show the configured path and say it is
-missing; only show the download message when the cache is genuinely empty and
-no override is set.
-
-**Test:** format both the missing-override and empty-cache cases.
 
 ### B12 — cache cleanup can fail an otherwise successful install
 
@@ -829,7 +811,6 @@ standalone cleanup branch that adds review load without reducing risk.
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
 7. `refactor(cli): extract argument parsing and UI` (prep for B13)
 8. `fix(cli): reject unknown flags and extra targets` (B13)
-9. `fix(doctor): report a missing DEVHOP_CLOUDFLARED` (B11)
 10. `test: split suites and add regression helpers` (Phase 4)
 11. Gateway quarantine (Phase 5, done 2026-10-27)
 12. `docs: use packaged demo assets or absolute URLs` (B16)
