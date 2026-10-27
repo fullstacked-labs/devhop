@@ -8,6 +8,11 @@
 
 > **Your phone says "Blocked request. This host is not allowed." `npx devhop` fixes it.**
 
+<picture>
+  <source srcset="docs/demo.avif" type="image/avif">
+  <img src="docs/demo-poster.png" alt="On a phone, a plain Cloudflare tunnel gets Vite's Blocked request page. npx devhop 5173 prints a QR code, the same app loads on the phone, and switching the theme in App.jsx hot-reloads the phone in 226 ms.">
+</picture>
+
 Hot reload, real HTTPS (mic, camera, passkeys) and a QR code, with no config edits or accounts.
 
 ```text
@@ -19,8 +24,6 @@ Safari:   TypeError: undefined is not an object (evaluating 'navigator.mediaDevi
 ```bash
 npx devhop [port]
 ```
-
-![demo](docs/demo.gif)
 
 ```text
  🦘 DEVHOP 
