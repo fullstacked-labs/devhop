@@ -190,6 +190,11 @@ export function createMasqueradeProxy({
       }
     );
     upstreamReq.on('error', (err) => send502(res, err));
+    // A phone that drops mid-stream (SSE, HMR, a large download) must not keep
+    // the dev server writing into a dead response.
+    res.on('close', () => {
+      if (!res.writableFinished) upstreamReq.destroy();
+    });
     req.pipe(upstreamReq);
   }
 

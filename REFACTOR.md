@@ -17,7 +17,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
-| B3 | `src/proxy.js` leaks the upstream request on client abort | high | reproduced |
 | B4 | `src/proxy.js` drops the body of a refused upgrade | medium-high | reproduced |
 | B5 | `src/proxy.js` wrong-scheme hint almost never fires | medium-high | reproduced |
 | B6 | `src/port.js` keeps IPv6 brackets, so targets fail to connect | medium | reproduced |
@@ -91,24 +90,6 @@ escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
 **Test:** a stub traps SIGTERM and stays alive; `close()` must resolve with the
 stub dead within the fallback window, including when the caller exits right
 after awaiting it.
-
-### B3 — client abort leaks the upstream request
-
-**Where:** `src/proxy.js:172-194`
-
-`upstreamRes.pipe(res)` has no teardown when the client disconnects. The proxy
-keeps pulling from the dev server and writing into a dead response.
-
-**Repro:** the client aborted after the first chunk; the backend never saw
-`res.on('close')` and wrote 24 more chunks in 500 ms.
-
-**Fix:** destroy `upstreamReq` from `res.on('close')` and handle request
-aborts; or use `stream.pipeline`, which tears both sides down on either close.
-(An upstream that dies mid-response is already handled by
-`upstreamRes.on('error', () => res.destroy())`; the client sees an abort.)
-
-**Test:** abort a streaming response and assert the backend sees its response
-close.
 
 ### B4 — a refused upgrade loses its body
 
@@ -863,8 +844,9 @@ This is the highest-value change and fixes B7 and B13.
   `src`.
 - Add `src/upstream.js`: `normalizeHost`, `isLoopback`, and `requestOptions` in
   one place. This fixes B6 and B8 and keeps the TLS policy out of request code.
-- Add one `pipeWithTeardown(src, dst, upstreamReq)` helper for the normal and
-  upgrade paths. Fix B3 and B4 together.
+- B3 landed as a four-line `res.on('close')` handler, without a helper; fix B4
+  inside `proxyUpgrade` the same way and add a helper only if it removes
+  duplication.
 - Add `test/headers.test.js` for the pure rewrites and keep the existing
   integration tests for the wire.
 
@@ -940,7 +922,6 @@ standalone cleanup branch that adds review load without reducing risk.
 ## Suggested PR order
 
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
-3. `fix(proxy): tear down upstream when the client disconnects` (B3)
 4. `fix(proxy): forward the body of a refused upgrade` (B4)
 5. `fix(proxy): report a wrong upstream scheme` (B5)
 6. `fix(port): normalise IPv6 loopback targets` (B6)
@@ -981,3 +962,8 @@ Things found while fixing the items above. Newest last.
   an injected `spawnImpl` (Phase 3) removes the skips.
 - The "regex only" location test was deleted with B1; the split-chunk test
   drives `startTunnel` and fails on the old code.
+- B14 ("response hangs after headers") was audited as a bug and disproved: an
+  upstream that dies mid-response is already handled by
+  `upstreamRes.on('error', () => res.destroy())`, and the client sees an abort.
+- The B3 regression test needs `closeAllConnections()` in `t.after`, or the
+  streaming backend keeps the test runner alive.

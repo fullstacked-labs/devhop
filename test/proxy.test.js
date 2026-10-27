@@ -419,6 +419,44 @@ test('Proxy injects Connection: close on chunked Transfer-Encoding requests', as
   assert.strictEqual(backendConnectionHeader, 'close', 'Should set Connection: close for chunked transfers');
 });
 
+test('Proxy closes the upstream response when the client aborts mid-stream', async (t) => {
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+
+  let backendSawClose;
+  const backendClosed = new Promise((resolve) => { backendSawClose = resolve; });
+  const backend = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    const timer = setInterval(() => res.write('chunk\n'), 10);
+    res.on('close', () => {
+      clearInterval(timer);
+      backendSawClose();
+    });
+  });
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.closeAllConnections();
+    proxyServer.closeAllConnections();
+    backend.close();
+    proxyServer.close();
+  });
+
+  const request = http.get({ host: '127.0.0.1', port: proxyPort, path: '/stream' }, (res) => {
+    res.once('data', () => request.destroy());
+  });
+  request.on('error', () => {});
+
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('backend response was still open 2 s after the client aborted')), 2000);
+  });
+  await Promise.race([backendClosed, deadline]);
+  clearTimeout(timer);
+});
+
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');
   if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
