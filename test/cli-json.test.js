@@ -29,6 +29,20 @@ test('--json reports an invalid target as one error event', async () => {
   assert.ok(event.message.length > 0);
 });
 
+test('--json reports an unknown option as one error event', async () => {
+  const stdout = await runStubbed(['3000', '--jsno', '--json']);
+  assert.equal(stdout.length, 1);
+  const event = JSON.parse(stdout[0]);
+  assert.equal(event.code, 'INVALID_ARGUMENT');
+  assert.match(event.message, /--jsno/);
+});
+
+test('--json reports two targets as one error event', async () => {
+  const stdout = await runStubbed(['3000', '4000', '--json']);
+  assert.equal(stdout.length, 1);
+  assert.equal(JSON.parse(stdout[0]).code, 'INVALID_ARGUMENT');
+});
+
 test('--json reports the quarantined gateway flag as one error event', async () => {
   const stdout = await runStubbed(['3000', '--json', '--gateway', 'wss://relay.example.com']);
   assert.equal(stdout.length, 1);

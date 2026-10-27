@@ -41,6 +41,24 @@ test('parseArgs reports an unparseable target as INVALID_TARGET and keeps the js
   }
 });
 
+test('parseArgs rejects unknown options with INVALID_ARGUMENT', () => {
+  for (const args of [['3000', '--jsno'], ['--jsno', '3000'], ['3000', '-x'], ['3000', '--json=true'], ['--no-qrcode']]) {
+    const result = parseArgs(args);
+    assert.equal(result.error?.code, 'INVALID_ARGUMENT', args.join(' '));
+    assert.match(result.error.message, /^Unknown option "-/);
+    assert.match(result.error.hint, /--json, --no-qr, --http2/);
+  }
+});
+
+test('parseArgs rejects more than one target with INVALID_ARGUMENT', () => {
+  for (const args of [['3000', '4000'], ['3000', '--json', 'localhost:5173'], ['3000', 'garbage']]) {
+    const result = parseArgs(args);
+    assert.equal(result.error?.code, 'INVALID_ARGUMENT', args.join(' '));
+    assert.match(result.error.message, /^Expected one target, got "/);
+  }
+  assert.equal(parseArgs(['3000', '4000', '--json']).json, true);
+});
+
 test('parseArgs rejects the quarantined --gateway flag in both spellings', () => {
   for (const args of [['--gateway', 'wss://relay.example.com'], ['--gateway=wss://relay.example.com', '3000']]) {
     assert.equal(parseArgs(args).error.code, 'GATEWAY_UNAVAILABLE', args.join(' '));

@@ -17,9 +17,7 @@ item once its fix lands, or mark it done with a link to the commit.
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
-| B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
-| B13 | `src/cli.js` ignores unknown flags and extra targets | low | inspection |
 
 ### Gateway (quarantined)
 
@@ -82,28 +80,6 @@ escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
 stub dead within the fallback window, including when the caller exits right
 after awaiting it.
 
-### B7 — `--gateway <url>` is parsed as a target
-
-**Where:** `src/cli.js:78-88`
-
-With no positional target, `wss://relay.example.com` is a non-flag value that
-fails `parseTarget`, so `devhop --gateway wss://…` exits `INVALID_TARGET`
-instead of auto-detecting. A bare `wss://` passes the regex and fails later
-with a raw `Invalid URL` from `new URL()`.
-
-**Repro:** `run(['--gateway', 'wss://relay.example.com', '--json'])` emitted
-`INVALID_TARGET` naming the gateway URL.
-
-**Fix:** consume the gateway value inside an explicit argument parser and
-validate `new URL()` there; emit `INVALID_GATEWAY_URL` with a runnable example.
-
-**Test:** gateway with no target auto-detects; gateway with a bad authority
-fails with `INVALID_GATEWAY_URL`, not `INVALID_TARGET`.
-
-**Resolved by quarantine:** the flag is gone, so `--gateway` now exits with
-`GATEWAY_UNAVAILABLE` and never reaches target parsing. Reviving the transport
-means fixing this in the new argument parser, not restoring the old block.
-
 ### B10 — free-port race and unhandled `listen` error
 
 **Where:** `src/cli.js:136-151`, `src/port.js:63-71`
@@ -118,20 +94,6 @@ listener, so `EADDRINUSE` becomes an uncaught event/stack trace.
 
 **Test:** start the proxy twice; the second must either get a different port
 or a clean error, never an uncaught event.
-
-### B13 — unknown flags and extra targets are silently ignored
-
-**Where:** `src/cli.js:78-88`
-
-`npx devhop 3000 --jsno` behaves as if the flag was never passed, and
-`npx devhop 3000 4000` silently uses 3000. Typos and conflicting instructions
-become support questions instead of errors.
-
-**Fix:** explicit argument parsing that rejects unknown options, accepts one
-target, and handles `--` for a target that starts with a dash.
-
-**Test:** table-driven parser tests for unknown flags, repeated targets, and
-`--`.
 
 ## Gateway (quarantined)
 
@@ -658,9 +620,9 @@ pile of closures.
 
 ### Phase 1 — put a boundary around CLI arguments
 
-`src/args.js`, `src/ui.js`, `fail()` and `test/args.test.js` have landed. What is
-left is the strictness change (B13) and making `quit()` await
-`tunnelHandle.close()` (B2).
+Landed: `src/args.js`, `src/ui.js`, `fail()`, `test/args.test.js` and the strict
+parser (B13). What is left is making `quit()` await `tunnelHandle.close()`
+(B2).
 
 ### Phase 2 — separate proxy decisions from sockets
 
@@ -742,11 +704,10 @@ standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-1. `fix(cli): reject unknown flags and extra targets` (B13)
-2. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
+1. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
    `close()`)
-3. `fix(cli): bind the proxy on an OS-assigned port` (B10)
-4. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
+2. `fix(cli): bind the proxy on an OS-assigned port` (B10)
+3. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
    release
 
 ## Open decisions
@@ -844,3 +805,12 @@ Things found while fixing the items above. Newest last.
 - `fail()` prints the example hint without the cyan highlighting the old inline
   `console.error` calls had, and the human `NO_DEV_SERVER` text now shows the
   same message as the JSON event (the two used to differ).
+- B7 (`--gateway <url>` parsed as a target) closed with the quarantine. If the
+  transport is revived, `parseArgs` must consume the `--gateway` value and
+  validate it as a URL (an `INVALID_GATEWAY_URL` code with a runnable example);
+  today it rejects the flag outright with `GATEWAY_UNAVAILABLE`.
+- The strict parser lists valid options in its hint, but does not suggest the
+  closest one ("did you mean --json?"). That would take a small edit-distance
+  helper, which nothing else needs yet.
+- `GATEWAY_UNAVAILABLE` is emitted but is not in the README's list of error
+  codes, because the flag was never documented.
