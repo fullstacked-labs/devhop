@@ -792,4 +792,13 @@ Things found while fixing the items above. Newest last.
   `GATEWAY_UNAVAILABLE` in the README (the flag was never documented, and the
   changelog covers its removal), an `openssl` skip guard (the existing TLS test
   has none and CI has no Windows job), and docstring coverage.
+- A refused upgrade whose upstream goes idle (headers, a partial body, then
+  silence) stays open for the full 5 s idle cap after the client leaves, for both
+  `destroy()` and `end()`. A `clientSocket.once('close', ...)` handler does not
+  shorten it: the proxy-side socket stays half-open until something is written
+  to it, so `close` never fires early. Tearing down on `end` instead would cut
+  off a client that half-closes but is still reading. An actively streaming
+  upstream is not affected, because the next write to the departed client
+  resets and the existing error handler closes the upstream within about
+  200 ms.
 
