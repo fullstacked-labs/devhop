@@ -17,7 +17,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | ID | Area | Severity | State |
 | --- | --- | --- | --- |
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
-| B4 | `src/proxy.js` drops the body of a refused upgrade | medium-high | reproduced |
 | B5 | `src/proxy.js` wrong-scheme hint almost never fires | medium-high | reproduced |
 | B6 | `src/port.js` keeps IPv6 brackets, so targets fail to connect | medium | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
@@ -90,23 +89,6 @@ escalating to SIGKILL if needed). `quit()` awaits it before `process.exit`.
 **Test:** a stub traps SIGTERM and stays alive; `close()` must resolve with the
 stub dead within the fallback window, including when the caller exits right
 after awaiting it.
-
-### B4 — a refused upgrade loses its body
-
-**Where:** `src/proxy.js:236-240`
-
-For a non-101 response the proxy writes only `buffered.subarray(0, end + 4)`
-and immediately destroys the client socket. Any body bytes already buffered are
-discarded, and the write can be cut off before it flushes.
-
-**Repro:** upstream answered `404` with `Content-Length: 5` and `nope!`; the
-client received the headers and no body.
-
-**Fix:** `clientSocket.end(buffered)` and pipe the remaining upstream response
-until the upstream closes, instead of destroying at the header boundary.
-
-**Test:** a refused upgrade with a body of a few bytes and one large enough to
-span chunks; both must arrive intact.
 
 ### B5 — the wrong-scheme hint almost never fires
 
@@ -844,9 +826,6 @@ This is the highest-value change and fixes B7 and B13.
   `src`.
 - Add `src/upstream.js`: `normalizeHost`, `isLoopback`, and `requestOptions` in
   one place. This fixes B6 and B8 and keeps the TLS policy out of request code.
-- B3 landed as a four-line `res.on('close')` handler, without a helper; fix B4
-  inside `proxyUpgrade` the same way and add a helper only if it removes
-  duplication.
 - Add `test/headers.test.js` for the pure rewrites and keep the existing
   integration tests for the wire.
 
@@ -922,7 +901,6 @@ standalone cleanup branch that adds review load without reducing risk.
 ## Suggested PR order
 
 2. `fix(tunnel): actually escalate to SIGKILL on close` (B2)
-4. `fix(proxy): forward the body of a refused upgrade` (B4)
 5. `fix(proxy): report a wrong upstream scheme` (B5)
 6. `fix(port): normalise IPv6 loopback targets` (B6)
 7. `refactor(cli): extract argument parsing and UI` (prep for B13)
@@ -967,3 +945,8 @@ Things found while fixing the items above. Newest last.
   `upstreamRes.on('error', () => res.destroy())`, and the client sees an abort.
 - The B3 regression test needs `closeAllConnections()` in `t.after`, or the
   streaming backend keeps the test runner alive.
+- B4 was rated medium-high, but a browser does not expose the body of a failed
+  WebSocket handshake, so only curl-style clients benefit. The fix is small
+  enough to keep. A keep-alive upstream never closes after its 404, so the proxy
+  releases the client after 5 s of upstream silence (measured: 5015 ms, body
+  intact).

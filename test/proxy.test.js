@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -456,6 +457,43 @@ test('Proxy closes the upstream response when the client aborts mid-stream', asy
   await Promise.race([backendClosed, deadline]);
   clearTimeout(timer);
 });
+
+for (const [label, bodySize] of [['small', 5], ['multi-chunk', 200_000]]) {
+  test(`Proxy forwards the full body of a refused WebSocket upgrade (${label})`, async (t) => {
+    const backendPort = await findFreePort();
+    const proxyPort = await findFreePort();
+    const body = 'n'.repeat(bodySize);
+
+    const backend = net.createServer((socket) => {
+      socket.once('data', () => {
+        socket.write(`HTTP/1.1 404 Not Found\r\nContent-Length: ${bodySize}\r\nConnection: close\r\n\r\n`);
+        // The body trails the headers, so it is not in the first upstream read.
+        setTimeout(() => socket.end(body), 50);
+      });
+    });
+    await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+
+    const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort });
+    await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+    t.after(() => {
+      backend.close();
+      proxyServer.close();
+    });
+
+    const response = await new Promise((resolve, reject) => {
+      const client = net.connect(proxyPort, '127.0.0.1', () => {
+        client.write('GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n');
+      });
+      const chunks = [];
+      client.on('data', (chunk) => chunks.push(chunk));
+      client.on('close', () => resolve(Buffer.concat(chunks).toString('latin1')));
+      client.on('error', reject);
+    });
+
+    assert.match(response, /^HTTP\/1\.1 404 /);
+    assert.strictEqual(response.slice(response.indexOf('\r\n\r\n') + 4), body);
+  });
+}
 
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');

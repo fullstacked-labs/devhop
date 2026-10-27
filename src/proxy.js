@@ -239,9 +239,12 @@ export function createMasqueradeProxy({
       upstreamSocket.removeListener('data', onUpstreamData);
       const status = Number(buffered.toString('latin1').split(' ')[1]);
       if (status !== 101) {
-        clientSocket.write(buffered.subarray(0, end + 4));
-        clientSocket.destroy();
-        upstreamSocket.destroy();
+        // Forward the refusal with its body so the client can see why. A
+        // keep-alive upstream never closes, so cap how long we wait for it.
+        clientSocket.write(buffered);
+        upstreamSocket.pipe(clientSocket);
+        upstreamSocket.on('close', () => clientSocket.end());
+        upstreamSocket.setTimeout(5000, () => upstreamSocket.destroy());
         return;
       }
       clientSocket.write(buffered);
