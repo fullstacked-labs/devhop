@@ -1,12 +1,15 @@
 # Refactor notes
 
-Audit of devhop 0.2.0 on 2026-10-27. The gateway quarantine (Phase 5) and the
-0.2.1 bug batch (B1, B3–B6, B8, B9, B11, B12, B16) landed the same day and were
-removed from this file; the rest is open. This is a backlog for structural work,
+Audit of devhop 0.2.0 on 2026-10-27. The gateway quarantine (Phase 5), the bug
+fixes (B1, B3–B6, B8, B9, B11, B12, B16) and the CLI work (B2, B10, B13, plus
+the `src/args.js` and `src/ui.js` split) landed the same day, for release as
+0.3.0, and were removed from this file; B7 is obsolete, B14 was disproved and B15 was
+dropped (see the notes at the bottom). The rest is open. This is a backlog for structural work,
 not a changelog. The IDs (`B1`, `G3`, `S1`) are for commit messages and issues;
 the `D`/`S`/`A` items are code quality, not behaviour.
 
-`npm test` is 111/111 green, so every item below is outside the current suite. "Reproduced" means a throwaway script showed the behaviour;
+`npm test` is 123/123 green, so every item below is outside the current suite.
+"Reproduced" means a throwaway script showed the behaviour;
 "inspection" means the code path is clear but no test covers it yet. Remove an
 item once its fix lands, or mark it done with a link to the commit.
 
@@ -14,8 +17,8 @@ item once its fix lands, or mark it done with a link to the commit.
 
 ### Shipping path
 
-| ID | Area | Severity | State |
-| --- | --- | --- | --- |
+No open items. B1–B16 are fixed, decided or dropped; the notes at the bottom
+record what was learned.
 
 ### Gateway (quarantined)
 
@@ -52,8 +55,6 @@ five hand-written WebSocket parsers, and tests that assert the implementation or
 quietly tolerate the bugs above. The dead code is small but real. None of these
 items change runtime behaviour by itself; they are what makes the behaviour
 fixes expensive to review.
-
-## Shipping path
 
 ## Gateway (quarantined)
 
@@ -314,7 +315,7 @@ transport and timers so the cable-pull test does not need `destroyForTest`.
 
 #### S2 — `run()` still owns the whole lifecycle
 
-**Where:** `src/cli.js:21-198`; `process.exit` at 18, 94, 130, 141, 180, 194
+**Where:** `src/cli.js:21-220`; `process.exit` at 18, 94, 146, 151, 163, 202, 216
 
 Argument parsing (`src/args.js`), the help and dashboard (`src/ui.js`) and the
 validation errors (`fail()`) moved out. `run()` still owns auto-detection,
@@ -556,11 +557,11 @@ pile of closures.
 
 ## Why contributing is harder than it needs to be
 
-- `src/cli.js` is 267 lines with argument parsing, target detection, binary
-  install, proxy lifecycle, tunnel callbacks, signal handling, dashboard, and
-  eight `process.exit` calls. The error text is duplicated between the JSON
-  event and the human message, so they can drift.
-- `test/proxy.test.js` is 600 lines and imports proxy, tunnel, port, and CLI
+- `src/cli.js` is 220 lines with target detection, binary install, proxy
+  lifecycle, tunnel callbacks, signal handling, and seven `process.exit` calls.
+  Validation errors go through `fail()`, but the tunnel and uncaught-error
+  paths still print their own text.
+- `test/proxy.test.js` is 867 lines and imports proxy, tunnel, port, and CLI
   code. A proxy failure and a tunnel failure surface in the same file.
 - `src/proxy.js` carries a 52-line HTML document inline; every proxy change
   shows up as a large diff.
@@ -738,11 +739,10 @@ Things found while fixing the items above. Newest last.
   checks. It parses `src`, `srcset` and `![](…)` references only; a relative
   `<a href>` to a file outside `files` (the badge links to `./skills/…`, which
   does ship) is not checked.
-- `CHANGELOG.md`'s Unreleased section also holds the `--gateway` removal from the
-  quarantine. That flag was hidden and experimental, so a patch release is
-  defensible, but a reader of 0.2.1's notes will see a "Removed" entry.
-- Nothing from this pass is pushed or tagged. Releases go through the tag
-  workflow only.
+- Everything ships as 0.3.0 with no 0.2.1 release: the fixes alone would have
+  been a patch, but the `--gateway` removal and the stricter argument parsing
+  are visible changes, and one tag keeps the release notes in one section.
+  Releases go through the tag workflow only.
 - B15 (`--json` events lost on `process.exit`) was dropped by decision. A pipe
   write is lost only when the pipe is already full, which took about 300 KB
   queued ahead of a stalled reader; devhop's events are a few hundred bytes.

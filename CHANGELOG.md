@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 ### Fixed
 - The tunnel URL and edge location are recognised when cloudflared's output is split mid-line; before, devhop could stay connected without ever showing the URL.
@@ -12,8 +12,11 @@
 - `--doctor` reports a missing `DEVHOP_CLOUDFLARED` path instead of saying cloudflared "isn't downloaded yet".
 - Failing to delete an old cloudflared version no longer fails an install that succeeded.
 - The README demo images load on the npm page.
+- When devhop is stopped by a signal it now waits for cloudflared to exit, and kills it after half a second if it ignores SIGTERM. Before, it exited at once and a cloudflared that ignored SIGTERM kept running. The `closed` JSON event is now emitted after cloudflared has exited.
+- The local proxy now takes its port from the OS instead of probing for a free one first, which removes a window where another process could grab the port. If the proxy cannot start, devhop reports `PROXY_START_FAILED`.
 
 ### Changed
+- Unknown options and more than one target are now an `INVALID_ARGUMENT` error instead of being ignored. `npx devhop 3000 --jsno` used to run as `npx devhop 3000`, and `npx devhop 3000 4000` silently used 3000.
 - The README and `llms.txt` now say that upstream HTTPS certificates are not verified for any host, so self-signed certificates work; point devhop only at servers you trust.
 
 ### Removed
