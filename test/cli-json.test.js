@@ -106,7 +106,7 @@ test('SIGTERM leaves no cloudflared behind, even one that ignores SIGTERM', asyn
   if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
   const { devhop, state, output } = await startDevhopWithStub(t);
 
-  const exited = new Promise((resolve) => devhop.once('exit', resolve));
+  const exited = new Promise((resolve) => devhop.once('close', resolve));
   devhop.kill('SIGTERM');
 
   assert.equal(await exited, 0);

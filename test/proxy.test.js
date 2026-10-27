@@ -635,15 +635,20 @@ test('Tunnel close() resolves only after a cloudflared that ignores SIGTERM is k
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'cloudflared must be gone when close() resolves');
 });
 
-test('Tunnel close() resolves when cloudflared could not be started', async () => {
-  let startError = null;
+test('Tunnel close() resolves when cloudflared could not be started', async (t) => {
+  let reportSpawnError;
+  const spawnFailed = new Promise((resolve) => { reportSpawnError = resolve; });
   const handle = startTunnel({
     localPort: 3000,
     binPath: path.join(os.tmpdir(), 'devhop-no-such-cloudflared'),
-    onError: (err) => { startError = err; },
+    onError: reportSpawnError,
     onClose: () => {},
   });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  t.after(() => handle.close());
+  const startError = await Promise.race([
+    spawnFailed,
+    new Promise((resolve) => setTimeout(() => resolve(null), 2000)),
+  ]);
   assert.ok(startError, 'expected a spawn error');
 
   await Promise.race([

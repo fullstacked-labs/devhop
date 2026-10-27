@@ -782,3 +782,14 @@ Things found while fixing the items above. Newest last.
   descriptor limit to trigger. The race itself cannot be reproduced in a test,
   so the new test only asserts that the port handed to cloudflared is open.
   `findFreePort()` is now used only by tests and the smoke fixtures.
+- CodeRabbit's review of the PR: fixed the `exit` vs `close` race in the SIGTERM
+  test, the 100 ms sleep in the spawn-failure test, and the README image check
+  (it now also requires the file to exist). Declined: the claim that a refused
+  upgrade keeps its upstream open after the client leaves. A client that
+  disconnects (`destroy()`) closes the upstream in about 200 ms through the
+  existing socket error handler; the retention only shows for a half-closed
+  client that is still reading, which is a live reader. Also declined: listing
+  `GATEWAY_UNAVAILABLE` in the README (the flag was never documented, and the
+  changelog covers its removal), an `openssl` skip guard (the existing TLS test
+  has none and CI has no Windows job), and docstring coverage.
+

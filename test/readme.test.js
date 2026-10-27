@@ -14,6 +14,7 @@ test('README images are absolute URLs or ship in the npm package', () => {
   for (const ref of refs) {
     if (/^https?:\/\//.test(ref)) continue;
     const local = path.normalize(ref);
+    assert.ok(fs.statSync(path.join(root, local), { throwIfNoEntry: false })?.isFile(), `${ref} does not exist`);
     assert.ok(
       files.some((entry) => local === entry || local.startsWith(`${entry}${path.sep}`)),
       `${ref} is relative but not covered by package.json "files", so it is broken on the npm page`
