@@ -20,7 +20,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
 | B13 | `src/cli.js` ignores unknown flags and extra targets | low | inspection |
-| B15 | `--json` events can be lost on `process.exit` | low | reproduced only with a stalled reader |
 
 ### Gateway (quarantined)
 
@@ -133,21 +132,6 @@ target, and handles `--` for a target that starts with a dash.
 
 **Test:** table-driven parser tests for unknown flags, repeated targets, and
 `--`.
-
-### B15 — `--json` events can be lost on `process.exit`
-
-**Where:** `src/cli.js` error paths, `emit` via `console.log`
-
-A pipe write that does not complete synchronously is dropped by
-`process.exit`. Reproduced only when about 300 KB was queued ahead of a stalled
-reader; a final event of a few hundred bytes always arrived. devhop's events are
-that small, so this is a hardening item, not a known failure. The CLI tests
-replace `process.exit` so a failing path does not kill the test runner, not
-because of this.
-
-**Fix:** have `run()` return or throw an exit code, set `process.exitCode` in
-`bin/devhop.js`, and let the event loop drain. Add a test that reads stdout
-from a child process and asserts the final event is complete.
 
 ## Gateway (quarantined)
 
@@ -406,23 +390,19 @@ transport and timers so the cable-pull test does not need `destroyForTest`.
 **Test:** the existing integration tests keep working; add unit tests for
 `StreamTable` and backoff without sockets.
 
-#### S2 — `run()` is a 190-line function with eight exits
+#### S2 — `run()` still owns the whole lifecycle
 
-**Where:** `src/cli.js:37-227`; `process.exit` at 66, 80, 109, 123, 159, 170,
-209, 223
+**Where:** `src/cli.js:21-198`; `process.exit` at 18, 94, 130, 141, 180, 194
 
-It owns help/version/doctor, JSON mode, QR mode, protocol selection, the
-gateway tombstone, target validation, auto-detection, binary install, proxy
-creation, listen, signal handlers, cleanup, and the tunnel wiring. Most error
-paths repeat the same `emit` + `console.error` + `exit`
-shape, so the JSON and human messages already drift.
+Argument parsing (`src/args.js`), the help and dashboard (`src/ui.js`) and the
+validation errors (`fail()`) moved out. `run()` still owns auto-detection,
+binary install, proxy creation, listen, signal handlers, cleanup, and the
+tunnel wiring. The remaining exits are the signal handler, the uncaught-error
+handler and the tunnel callbacks; each needs cleanup to run first, so they do
+not fit `fail()`.
 
-**Fix:** Phase 1. `parseArgs()` returns a mode and options or one structured
-error; `fail()` owns the event/message/exit triple; `bin/devhop.js` sets
-`process.exitCode` after the event loop drains.
-
-**Test:** `test/args.test.js` without replacing `process.exit`; a child-process
-test for the final `--json` line (B15).
+**Fix:** extract the lifecycle (proxy, tunnel, cleanup) into its own module
+only if B2 or B10 make `run()` hard to change; otherwise leave it.
 
 #### S3 — `#handleRegister()` mixes six policies
 
@@ -555,8 +535,7 @@ cleanup if cleanup must run. In `bin/devhop.js`, log `err.stack ?? err.message`.
 If the JSON contract needs an `UNCAUGHT` event, include `stack` as an added
 field.
 
-**Test:** a child process that throws gets a stack in stderr, and the final JSON
-event is complete before exit (B15).
+**Test:** a child process that throws gets a stack in stderr.
 
 #### A4 — test-only seams in the shipped API
 
@@ -679,21 +658,9 @@ pile of closures.
 
 ### Phase 1 — put a boundary around CLI arguments
 
-This is the highest-value change and fixes B7 and B13.
-
-- Add `src/args.js`: `parseArgs(argv)` returns a mode plus parsed options, or
-  a structured `{ code, message, hint }`. It owns known flags, consumes the
-  `--gateway` value, rejects unknown flags and multiple targets, and validates
-  gateway URLs.
-- Add `src/ui.js`: move `printHelp`, `displayDashboard`, and the QR styling out
-  of `src/cli.js`.
-- Reduce `src/cli.js` to orchestration: doctor, detect, install, proxy,
-  tunnel, signals.
-- Replace the repeated `emit + console.error + process.exit` triplets with one
-  `fail(code, message, hint)`. Have `run()` return or throw an exit code;
-  `bin/devhop.js` sets `process.exitCode` after stdout drains (B15). B2 needs
-  the same change: `quit()` must await `tunnelHandle.close()`.
-- Add `test/args.test.js`: table-driven, fast, no `process.exit` replacement.
+`src/args.js`, `src/ui.js`, `fail()` and `test/args.test.js` have landed. What is
+left is the strictness change (B13) and making `quit()` await
+`tunnelHandle.close()` (B2).
 
 ### Phase 2 — separate proxy decisions from sockets
 
@@ -775,16 +742,12 @@ standalone cleanup branch that adds review load without reducing risk.
 
 ## Suggested PR order
 
-1. `refactor(cli): extract argument parsing and UI` (prep for B13, B2, B15)
-2. `fix(cli): reject unknown flags and extra targets` (B13)
-3. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
+1. `fix(cli): reject unknown flags and extra targets` (B13)
+2. `fix(tunnel): wait for cloudflared to exit on close` (B2; `quit()` awaits
    `close()`)
-4. `fix(cli): let the event loop drain before exiting` (B15), with B10
-   (`listen(0)` on the proxy) riding along
-5. `test: split suites and add regression helpers` (Phase 4)
-
-Step 1 pays for every later PR, and step 3 needs `quit()` to await `close()`, so
-it lands with or after step 1.
+3. `fix(cli): bind the proxy on an OS-assigned port` (B10)
+4. `test: split suites and add regression helpers` (Phase 4), after the 0.3.0
+   release
 
 ## Open decisions
 
@@ -870,4 +833,14 @@ Things found while fixing the items above. Newest last.
   defensible, but a reader of 0.2.1's notes will see a "Removed" entry.
 - Nothing from this pass is pushed or tagged. Releases go through the tag
   workflow only.
-
+- B15 (`--json` events lost on `process.exit`) was dropped by decision. A pipe
+  write is lost only when the pipe is already full, which took about 300 KB
+  queued ahead of a stalled reader; devhop's events are a few hundred bytes.
+  Revisit if an agent harness ever reports a truncated final event.
+- Moving `printHelp` and the dashboard into `src/ui.js` initially dropped the
+  `urlHost` import that the `ready` event in `cli.js` still uses. No test
+  reaches that line without a real tunnel, so only a manual identifier check
+  caught it. A fake-tunnel test for the `ready` event would close that gap.
+- `fail()` prints the example hint without the cyan highlighting the old inline
+  `console.error` calls had, and the human `NO_DEV_SERVER` text now shows the
+  same message as the JSON event (the two used to differ).

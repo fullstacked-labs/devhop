@@ -1,64 +1,56 @@
 import pc from 'picocolors';
 import { createMasqueradeProxy } from './proxy.js';
-import { detectDevPorts, findFreePort, parseTarget, urlHost } from './port.js';
+import { detectDevPorts, findFreePort, urlHost } from './port.js';
 import { ensureBinary, startTunnel } from './tunnel.js';
 import { waitForEdge } from './edge.js';
 import { collectDiagnostics, formatDiagnostics } from './doctor.js';
+import { parseArgs } from './args.js';
 import { printHelp, displayDashboard } from './ui.js';
 import { createRequire } from 'node:module';
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 
+// Prints the error (as a JSON event too under --json) and exits.
+function fail({ json, code, message, hint }) {
+  if (json) console.log(JSON.stringify({ event: 'error', code, message }));
+  console.error(pc.red(`\n${message}`));
+  if (hint) console.error(`${hint}\n`);
+  process.exit(1);
+}
+
 export async function run(args = []) {
-  if (args.includes('--help') || args.includes('-h')) {
+  const parsed = parseArgs(args);
+  if (parsed.error) fail({ json: parsed.json, ...parsed.error });
+
+  if (parsed.mode === 'help') {
     printHelp(VERSION);
     return;
   }
 
-  if (args.includes('--version') || args.includes('-v')) {
+  if (parsed.mode === 'version') {
     console.log(`v${VERSION}`);
     return;
   }
 
-  if (args.includes('--doctor')) {
+  if (parsed.mode === 'doctor') {
     const diagnostics = await collectDiagnostics();
     console.log(
-      args.includes('--json') ? JSON.stringify({ event: 'doctor', ...diagnostics }) : formatDiagnostics(diagnostics)
+      parsed.json ? JSON.stringify({ event: 'doctor', ...diagnostics }) : formatDiagnostics(diagnostics)
     );
     return;
   }
-  const isJson = args.includes('--json');
+
+  const isJson = parsed.json;
   const emit = (obj) => { if (isJson) console.log(JSON.stringify(obj)); };
-  const showQr = !args.includes('--no-qr') && !isJson;
-  const protocol = args.includes('--http2') ? 'http2' : undefined;
-  // The relay transport is quarantined in experimental/gateway/. Fail loudly
-  // instead of letting the URL fall through to target detection.
-  if (args.some((a) => a === '--gateway' || a.startsWith('--gateway='))) {
-    const message = '--gateway is not available in this build; the relay transport is quarantined under experimental/gateway/.';
-    emit({ event: 'error', code: 'GATEWAY_UNAVAILABLE', message });
-    console.error(pc.red(`\n${message}`));
-    console.error(`Example: ${pc.cyan('npx devhop 3000')}\n`);
-    process.exit(1);
-  }
+  const showQr = parsed.qr;
+  const protocol = parsed.protocol;
   let targetPort = null;
   let targetHost = '127.0.0.1';
   let targetProtocol = 'http:';
-  const targetArg = args.find((a) => !a.startsWith('-') && parseTarget(a));
-  // An explicit argument that fails to parse must error, not fall through to
-  // auto-detection — otherwise a typo like `devhop 99999` silently tunnels
-  // whatever unrelated server happens to be running.
-  const invalidArg = args.find((a) => !a.startsWith('-') && !parseTarget(a));
-  if (invalidArg && !targetArg) {
-    emit({ event: 'error', code: 'INVALID_TARGET', message: `Invalid target: "${invalidArg}" — expected a port, host:port, or http(s) URL.` });
-    console.error(pc.red(`\nInvalid target: "${invalidArg}" — expected a port, host:port, or http(s) URL.`));
-    console.error(`Examples: ${pc.cyan('npx devhop 3000')}, ${pc.cyan('npx devhop localhost:5173')}, ${pc.cyan('npx devhop https://localhost:8443')}\n`);
-    process.exit(1);
-  }
-  if (targetArg) {
-    const parsed = parseTarget(targetArg);
-    targetPort = parsed.port;
-    targetHost = parsed.host;
-    targetProtocol = parsed.protocol;
+  if (parsed.target) {
+    targetPort = parsed.target.port;
+    targetHost = parsed.target.host;
+    targetProtocol = parsed.target.protocol;
   } else {
     // Port auto-detection
     if (!isJson) console.log(`\n${pc.cyan('●')} Scanning for active dev servers...`);
@@ -75,13 +67,17 @@ export async function run(args = []) {
         console.log(`${pc.dim('  Tip: Specify explicitly with: npx devhop <port>')}`);
       }
     } else {
-      emit({ event: 'error', code: 'NO_DEV_SERVER', message: 'No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000.' });
-      console.error(pc.red('\nNo active dev server detected on standard dev ports.'));
-      console.error(`Please specify your dev server target explicitly:`);
-      console.error(`  ${pc.cyan('npx devhop <port>')}            ${pc.dim('(e.g. npx devhop 3000)')}`);
-      console.error(`  ${pc.cyan('npx devhop <host>:<port>')}     ${pc.dim('(e.g. npx devhop localhost:5173)')}`);
-      console.error(`  ${pc.cyan('npx devhop <url>')}             ${pc.dim('(e.g. npx devhop http://127.0.0.1:8080)')}\n`);
-      process.exit(1);
+      fail({
+        json: isJson,
+        code: 'NO_DEV_SERVER',
+        message: 'No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000.',
+        hint: [
+          'Target forms:',
+          '  npx devhop <port>            (e.g. npx devhop 3000)',
+          '  npx devhop <host>:<port>     (e.g. npx devhop localhost:5173)',
+          '  npx devhop <url>             (e.g. npx devhop http://127.0.0.1:8080)',
+        ].join('\n'),
+      });
     }
   }
 
