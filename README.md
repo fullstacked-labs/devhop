@@ -1,4 +1,4 @@
-# 🦘 devhop
+# 🐇 devhop
 
 [![npm version](https://img.shields.io/npm/v/devhop.svg)](https://www.npmjs.com/package/devhop)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -7,6 +7,11 @@
 ![smoke](https://github.com/fullstacked-labs/devhop/actions/workflows/smoke.yml/badge.svg)
 
 > **Your phone says "Blocked request. This host is not allowed." `npx devhop` fixes it.**
+
+<picture>
+  <source srcset="https://raw.githubusercontent.com/fullstacked-labs/devhop/main/docs/demo.avif" type="image/avif">
+  <img src="https://raw.githubusercontent.com/fullstacked-labs/devhop/main/docs/demo-poster.png" alt="On a phone, a plain Cloudflare tunnel gets Vite's Blocked request page. npx devhop 5173 prints a QR code, the same app loads on the phone, and switching the theme in App.jsx hot-reloads the phone in 226 ms.">
+</picture>
 
 Hot reload, real HTTPS (mic, camera, passkeys) and a QR code, with no config edits or accounts.
 
@@ -20,10 +25,8 @@ Safari:   TypeError: undefined is not an object (evaluating 'navigator.mediaDevi
 npx devhop [port]
 ```
 
-![demo](docs/demo.gif)
-
 ```text
- 🦘 DEVHOP 
+ 🐇 DEVHOP 
 
   Target:       http://localhost:3000
   Mobile URL:   https://breeze-sunset-vintage-glade.trycloudflare.com
@@ -78,7 +81,7 @@ For an HTTPS dev server, pass the upstream URL including its scheme:
 npx devhop https://localhost:8443
 ```
 
-Targets accept bare ports, `host:port`, and `http://` or `https://` URLs. A bare `443` implies HTTPS. Self-signed certificates on loopback are accepted. If the upstream scheme is wrong, devhop returns a `502` with a hint to retry using the matching URL scheme.
+Targets accept bare ports, `host:port`, and `http://` or `https://` URLs. A bare `443` implies HTTPS. devhop does not verify the upstream certificate, so self-signed dev certificates work; point it only at servers you trust. If the upstream scheme is wrong, devhop returns a `502` with a hint to retry using the matching URL scheme.
 
 ### Options
 
@@ -113,7 +116,7 @@ npx devhop --doctor          Print diagnostics for bug reports
 {"event":"error","code":"NO_DEV_SERVER","message":"No active dev server detected on standard dev ports. Pass a port, e.g. npx devhop 3000."}
 ```
 
-Error codes: `INVALID_TARGET`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `UNCAUGHT`. Machine-readable summary: [`llms.txt`](./llms.txt).
+Error codes: `INVALID_ARGUMENT`, `INVALID_TARGET`, `NO_DEV_SERVER`, `CLOUDFLARED_INSTALL_FAILED`, `PROXY_START_FAILED`, `TUNNEL_START_FAILED`, `TUNNEL_EXITED`, `UNCAUGHT`. Machine-readable summary: [`llms.txt`](./llms.txt).
 
 ### cloudflared
 

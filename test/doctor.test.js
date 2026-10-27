@@ -27,6 +27,20 @@ test('formatDiagnostics says when cloudflared is not downloaded', () => {
   assert.match(out, /none detected/);
 });
 
+test('formatDiagnostics names a DEVHOP_CLOUDFLARED path that does not exist', () => {
+  const out = formatDiagnostics({
+    devhop: '0.2.0',
+    node: 'v22.0.0',
+    platform: 'linux',
+    arch: 'x64',
+    cloudflared: { path: '/nonexistent/cloudflared', override: true, cached: false, version: null },
+    devPorts: [],
+    cacheDir: '/nonexistent',
+  });
+  assert.match(out, /\/nonexistent\/cloudflared \(DEVHOP_CLOUDFLARED\) — file not found/);
+  assert.doesNotMatch(out, /not downloaded yet/);
+});
+
 test('the formatted output never contains the home directory', async () => {
   const out = formatDiagnostics(await collectDiagnostics());
   assert.ok(!out.includes(os.homedir()));

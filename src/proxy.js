@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import tls from 'node:tls';
 import net from 'node:net';
+import { urlHost } from './port.js';
 
 const INSPECT_PAGE = `<!doctype html>
 <html lang="en">
@@ -85,7 +86,8 @@ export function createMasqueradeProxy({
   targetProtocol = 'http:',
   getPublicUrl = () => null
 }) {
-  const normalizedHost = targetHost === '0.0.0.0' ? '127.0.0.1' : targetHost;
+  // A wildcard bind address is not connectable everywhere; its loopback is.
+  const normalizedHost = { '0.0.0.0': '127.0.0.1', '::': '::1' }[targetHost] ?? targetHost;
   const upstreamIsHttps = targetProtocol === 'https:';
 
   function masqueradeRequestHeaders(req) {
@@ -154,6 +156,23 @@ export function createMasqueradeProxy({
     return headers;
   }
 
+  // TLS to a plain-HTTP server fails as EPROTO (older Node: ERR_SSL_WRONG_VERSION_NUMBER);
+  // some servers just reset the connection instead.
+  const TLS_MISMATCH_CODES = new Set(['EPROTO', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ECONNRESET']);
+
+  function schemeHint(err) {
+    const target = `${urlHost(normalizedHost)}:${targetPort}`;
+    if (upstreamIsHttps && TLS_MISMATCH_CODES.has(err?.code)) {
+      return `devhop: TLS handshake with port ${targetPort} failed — the dev server may be plain HTTP. Try: npx devhop http://${target}`;
+    }
+    // A TLS server drops a plain-HTTP request without answering; a crashed
+    // server looks the same, so the hint stays conditional.
+    if (!upstreamIsHttps && err?.code === 'ECONNRESET') {
+      return `devhop: port ${targetPort} closed the connection without a response — if the dev server uses HTTPS, try: npx devhop https://${target}`;
+    }
+    return null;
+  }
+
   function send502(res, err) {
     if (!res || res.headersSent || !res.writable) return;
     try {
@@ -161,11 +180,7 @@ export function createMasqueradeProxy({
         'Content-Type': 'text/plain',
         'Retry-After': '1'
       });
-      res.end(
-        err?.code === 'ECONNRESET' && upstreamIsHttps
-          ? `devhop: TLS handshake failed on port ${targetPort} — is the dev server really HTTPS? Try: npx devhop http://${normalizedHost}:${targetPort}`
-          : `devhop: Target server not responding on port ${targetPort}`
-      );
+      res.end(schemeHint(err) ?? `devhop: Target server not responding on port ${targetPort}`);
     } catch (_) {}
   }
 
@@ -178,8 +193,8 @@ export function createMasqueradeProxy({
         method: req.method,
         path: req.url,
         headers: masqueradeRequestHeaders(req),
-        // Self-signed local certs are fine: loopback traffic never leaves the
-        // kernel, so there is no MITM exposure.
+        // Dev servers use self-signed certs and you chose this target, so the
+        // certificate is not verified. That holds for non-loopback hosts too.
         ...(upstreamIsHttps ? { rejectUnauthorized: false } : {})
       },
       (upstreamRes) => {
@@ -190,6 +205,11 @@ export function createMasqueradeProxy({
       }
     );
     upstreamReq.on('error', (err) => send502(res, err));
+    // A phone that drops mid-stream (SSE, HMR, a large download) must not keep
+    // the dev server writing into a dead response.
+    res.on('close', () => {
+      if (!res.writableFinished) upstreamReq.destroy();
+    });
     req.pipe(upstreamReq);
   }
 
@@ -234,9 +254,12 @@ export function createMasqueradeProxy({
       upstreamSocket.removeListener('data', onUpstreamData);
       const status = Number(buffered.toString('latin1').split(' ')[1]);
       if (status !== 101) {
-        clientSocket.write(buffered.subarray(0, end + 4));
-        clientSocket.destroy();
-        upstreamSocket.destroy();
+        // Forward the refusal with its body so the client can see why. A
+        // keep-alive upstream never closes, so cap how long we wait for it.
+        clientSocket.write(buffered);
+        upstreamSocket.pipe(clientSocket);
+        upstreamSocket.on('close', () => clientSocket.end());
+        upstreamSocket.setTimeout(5000, () => upstreamSocket.destroy());
         return;
       }
       clientSocket.write(buffered);

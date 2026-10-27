@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { CLOUDFLARED_VERSION, downloadCloudflared } from './cloudflared.js';
 
 export function getBinPath() {
@@ -62,20 +63,27 @@ export async function ensureBinary(onProgress) {
 
 // Older pins sit next to the current one as <version>/ directories; releases
 // before 0.2 cached an unversioned binary directly in the cache root.
-function removeOldVersions(cacheRoot) {
+//
+// Best-effort: a stale directory we cannot delete must not fail an install that
+// already succeeded.
+export function removeOldVersions(cacheRoot) {
   for (const legacy of ['cloudflared', 'cloudflared.exe']) {
     try { fs.unlinkSync(path.join(cacheRoot, legacy)); } catch (_) {}
   }
-  for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (entry.isDirectory() && /^\d{4}\.\d+\.\d+$/.test(entry.name) && entry.name !== CLOUDFLARED_VERSION) {
-      fs.rmSync(path.join(cacheRoot, entry.name), { recursive: true, force: true });
+  try {
+    for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && /^\d{4}\.\d+\.\d+$/.test(entry.name) && entry.name !== CLOUDFLARED_VERSION) {
+        fs.rmSync(path.join(cacheRoot, entry.name), { recursive: true, force: true });
+      }
     }
-  }
+  } catch (_) {}
 }
 
 // Quick-tunnel creation fails intermittently; one retry fixes most first-run failures.
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 2000;
+// How long cloudflared gets to exit after SIGTERM before it is killed.
+const KILL_GRACE_MS = 500;
 
 export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, onError, onClose, onRetry }) {
   const tunnelArgs = ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${localPort}`];
@@ -96,16 +104,12 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
 
     let urlFound = false;
     const recentOutput = [];
-    const handleOutput = (data) => {
-      const text = data.toString();
-      for (const raw of text.split('\n')) {
-        const line = raw.trim();
-        if (line) {
-          recentOutput.push(line);
-          if (recentOutput.length > 10) recentOutput.shift();
-        }
-      }
-      const locMatch = text.match(/location=([A-Z0-9]+)/i);
+    const handleLine = (raw) => {
+      const line = raw.trim();
+      if (!line) return;
+      recentOutput.push(line);
+      if (recentOutput.length > 10) recentOutput.shift();
+      const locMatch = line.match(/location=([A-Z0-9]+)/i);
       if (locMatch && onLocation) {
         const loc = locMatch[1].toUpperCase();
         if (loc !== lastLocation) {
@@ -113,15 +117,17 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
           onLocation(loc);
         }
       }
-      const urlMatch = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      const urlMatch = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
       if (urlMatch && !urlFound) {
         urlFound = true;
         if (onUrl) onUrl(urlMatch[0]);
       }
     };
 
-    child.stdout.on('data', handleOutput);
-    child.stderr.on('data', handleOutput);
+    // A pipe read can end mid-line, so match on complete lines only.
+    for (const stream of [child.stdout, child.stderr]) {
+      createInterface({ input: stream }).on('line', handleLine);
+    }
 
     child.on('error', (err) => {
       if (onError) onError(err, { recentOutput: recentOutput.join('\n'), urlFound });
@@ -143,17 +149,24 @@ export function startTunnel({ localPort, binPath, protocol, onUrl, onLocation, o
   launch();
 
   return {
-    close: () => {
+    // Resolves once cloudflared has exited. A caller that exits right after
+    // close() would cancel a SIGKILL timer, so it has to wait for this.
+    close: () => new Promise((resolve) => {
       manualClose = true;
-      try {
-        current.kill('SIGTERM');
-        // SIGKILL fallback: cloudflared must not outlive devhop if it ignores SIGTERM.
-        setTimeout(() => {
-          try {
-            if (!current.killed) current.kill('SIGKILL');
-          } catch (_) {}
-        }, 500);
-      } catch (_) {}
-    }
+      const child = current;
+      // No pid means the spawn itself failed, so no 'exit' event will come.
+      if (!child || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const killTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch (_) {}
+      }, KILL_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(killTimer);
+        resolve();
+      });
+      try { child.kill('SIGTERM'); } catch (_) {}
+    })
   };
 }

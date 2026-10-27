@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createMasqueradeProxy } from '../src/proxy.js';
-import { startTunnel } from '../src/tunnel.js';
-import { isPortOpen, detectDevPorts, findFreePort, parseTarget } from '../src/port.js';
+import { startTunnel, removeOldVersions } from '../src/tunnel.js';
+import { isPortOpen, detectDevPorts, findFreePort, parseTarget, urlHost } from '../src/port.js';
 
 test('Inspector page is served by devhop while app responses stay byte-identical', async (t) => {
   const backendPort = await findFreePort();
@@ -240,8 +241,12 @@ test('parseTarget dynamically handles ports, hosts, URLs, and edge cases', () =>
   assert.deepStrictEqual(parseTarget('https://127.0.0.1:8443'), { port: 8443, host: '127.0.0.1', protocol: 'https:' });
   assert.deepStrictEqual(parseTarget('https://localhost'), { port: 443, host: 'localhost', protocol: 'https:' });
   assert.deepStrictEqual(parseTarget('http://127.0.0.1:3000/some/path'), { port: 3000, host: '127.0.0.1', protocol: 'http:' });
-  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
-  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '[::1]', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('[::1]:3000'), { port: 3000, host: '::1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('http://[::1]:3000'), { port: 3000, host: '::1', protocol: 'http:' });
+  assert.deepStrictEqual(parseTarget('https://[::1]:8443'), { port: 8443, host: '::1', protocol: 'https:' });
+  assert.strictEqual(urlHost('::1'), '[::1]');
+  assert.strictEqual(urlHost('127.0.0.1'), '127.0.0.1');
+  assert.strictEqual(urlHost('localhost'), 'localhost');
 
   assert.strictEqual(parseTarget(''), null);
   assert.strictEqual(parseTarget('--no-qr'), null);
@@ -419,6 +424,239 @@ test('Proxy injects Connection: close on chunked Transfer-Encoding requests', as
   assert.strictEqual(backendConnectionHeader, 'close', 'Should set Connection: close for chunked transfers');
 });
 
+test('Proxy closes the upstream response when the client aborts mid-stream', async (t) => {
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+
+  let backendSawClose;
+  const backendClosed = new Promise((resolve) => { backendSawClose = resolve; });
+  const backend = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    const timer = setInterval(() => res.write('chunk\n'), 10);
+    res.on('close', () => {
+      clearInterval(timer);
+      backendSawClose();
+    });
+  });
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.closeAllConnections();
+    proxyServer.closeAllConnections();
+    backend.close();
+    proxyServer.close();
+  });
+
+  const request = http.get({ host: '127.0.0.1', port: proxyPort, path: '/stream' }, (res) => {
+    res.once('data', () => request.destroy());
+  });
+  request.on('error', () => {});
+
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('backend response was still open 2 s after the client aborted')), 2000);
+  });
+  await Promise.race([backendClosed, deadline]);
+  clearTimeout(timer);
+});
+
+for (const [label, bodySize] of [['small', 5], ['multi-chunk', 200_000]]) {
+  test(`Proxy forwards the full body of a refused WebSocket upgrade (${label})`, async (t) => {
+    const backendPort = await findFreePort();
+    const proxyPort = await findFreePort();
+    const body = 'n'.repeat(bodySize);
+
+    const backend = net.createServer((socket) => {
+      socket.once('data', () => {
+        socket.write(`HTTP/1.1 404 Not Found\r\nContent-Length: ${bodySize}\r\nConnection: close\r\n\r\n`);
+        // The body trails the headers, so it is not in the first upstream read.
+        setTimeout(() => socket.end(body), 50);
+      });
+    });
+    await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+
+    const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort });
+    await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+    t.after(() => {
+      backend.close();
+      proxyServer.close();
+    });
+
+    const response = await new Promise((resolve, reject) => {
+      const client = net.connect(proxyPort, '127.0.0.1', () => {
+        client.write('GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n');
+      });
+      const chunks = [];
+      client.on('data', (chunk) => chunks.push(chunk));
+      client.on('close', () => resolve(Buffer.concat(chunks).toString('latin1')));
+      client.on('error', reject);
+    });
+
+    assert.match(response, /^HTTP\/1\.1 404 /);
+    assert.strictEqual(response.slice(response.indexOf('\r\n\r\n') + 4), body);
+  });
+}
+
+test('Proxy suggests http:// when an https: target is really plain HTTP', async (t) => {
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const backend = http.createServer((req, res) => res.end('plain'));
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetProtocol: 'https:' });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.close();
+    proxyServer.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), new RegExp(`Try: npx devhop http://127\\.0\\.0\\.1:${backendPort}`));
+});
+
+test('Proxy suggests https:// when an http: target is really TLS', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-scheme-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'),
+    '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+  const backendPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const backend = https.createServer(
+    { key: fs.readFileSync(path.join(dir, 'key.pem')), cert: fs.readFileSync(path.join(dir, 'cert.pem')) },
+    (req, res) => res.end('secure')
+  );
+  await new Promise((resolve) => backend.listen(backendPort, '127.0.0.1', resolve));
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetProtocol: 'http:' });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => {
+    backend.close();
+    proxyServer.close();
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), new RegExp(`try: npx devhop https://127\\.0\\.0\\.1:${backendPort}`));
+});
+
+test('Proxy keeps the generic 502 when nothing is listening on the target', async (t) => {
+  const deadPort = await findFreePort();
+  const proxyPort = await findFreePort();
+  const { server: proxyServer } = createMasqueradeProxy({ targetPort: deadPort });
+  await new Promise((resolve) => proxyServer.listen(proxyPort, '127.0.0.1', resolve));
+  t.after(() => proxyServer.close());
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/`);
+  assert.strictEqual(response.status, 502);
+  assert.match(await response.text(), /Target server not responding/);
+});
+
+for (const alias of ['::1', '::']) {
+  test(`Proxy reaches a dev server bound to IPv6 loopback through target host ${alias}`, async (t) => {
+    const backend = http.createServer((req, res) => res.end('over ipv6'));
+    const bound = await new Promise((resolve) => {
+      backend.once('error', () => resolve(false));
+      backend.listen(0, '::1', () => resolve(true));
+    });
+    if (!bound) { t.skip('IPv6 loopback unavailable on this host'); return; }
+    const backendPort = backend.address().port;
+
+    const { server: proxyServer } = createMasqueradeProxy({ targetPort: backendPort, targetHost: alias });
+    await new Promise((resolve) => proxyServer.listen(0, '127.0.0.1', resolve));
+    t.after(() => {
+      backend.close();
+      proxyServer.close();
+    });
+
+    const response = await fetch(`http://127.0.0.1:${proxyServer.address().port}/`);
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(await response.text(), 'over ipv6');
+  });
+}
+
+test('Cache cleanup removes older cloudflared versions and keeps the current one', async (t) => {
+  const { CLOUDFLARED_VERSION } = await import('../src/cloudflared.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const version of ['2020.1.1', CLOUDFLARED_VERSION, 'not-a-version']) {
+    fs.mkdirSync(path.join(root, version));
+  }
+  fs.writeFileSync(path.join(root, 'cloudflared'), 'legacy unversioned binary');
+
+  removeOldVersions(root);
+
+  assert.deepStrictEqual(fs.readdirSync(root).sort(), [CLOUDFLARED_VERSION, 'not-a-version'].sort());
+});
+
+test('Cache cleanup does not throw when an old version cannot be deleted', async (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.skip('needs POSIX permissions that apply to the current user');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-cache-'));
+  t.after(() => {
+    fs.chmodSync(root, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  fs.mkdirSync(path.join(root, '2020.1.1'));
+  fs.chmodSync(root, 0o555); // entries can no longer be removed
+
+  assert.doesNotThrow(() => removeOldVersions(root));
+  assert.ok(fs.existsSync(path.join(root, '2020.1.1')));
+});
+
+test('Tunnel close() resolves only after a cloudflared that ignores SIGTERM is killed', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-term-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pidFile = path.join(dir, 'pid');
+  const stub = path.join(dir, 'fake-cloudflared');
+  fs.writeFileSync(stub, [
+    '#!/usr/bin/env node',
+    `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    "process.on('SIGTERM', () => {});",
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  fs.chmodSync(stub, '755');
+
+  const handle = startTunnel({ localPort: 3000, binPath: stub, onClose: () => {} });
+  const started = Date.now();
+  while (!fs.existsSync(pidFile) || !fs.readFileSync(pidFile, 'utf8')) {
+    assert.ok(Date.now() - started < 5000, 'stub never started');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch (_) {} });
+
+  await handle.close();
+
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'cloudflared must be gone when close() resolves');
+});
+
+test('Tunnel close() resolves when cloudflared could not be started', async (t) => {
+  let reportSpawnError;
+  const spawnFailed = new Promise((resolve) => { reportSpawnError = resolve; });
+  const handle = startTunnel({
+    localPort: 3000,
+    binPath: path.join(os.tmpdir(), 'devhop-no-such-cloudflared'),
+    onError: reportSpawnError,
+    onClose: () => {},
+  });
+  t.after(() => handle.close());
+  const startError = await Promise.race([
+    spawnFailed,
+    new Promise((resolve) => setTimeout(() => resolve(null), 2000)),
+  ]);
+  assert.ok(startError, 'expected a spawn error');
+
+  await Promise.race([
+    handle.close(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('close() did not resolve after a failed spawn')), 2000)),
+  ]);
+});
+
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');
   if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
@@ -445,18 +683,52 @@ test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   assert.deepStrictEqual(locations, ['ARN']);
 });
 
-test('Tunnel location regex matches location=([A-Z0-9]+) case-insensitively', () => {
-  const samples = [
-    ['INF Registered tunnel connection connIndex=0 location=ARN', 'ARN'],
-    ['connIndex=3 location=lhr', 'LHR'],
-    ['location=SIN col=1', 'SIN'],
-  ];
-  for (const [line, expected] of samples) {
-    const m = line.match(/location=([A-Z0-9]+)/i);
-    assert.ok(m, `Should match edge location in: ${line}`);
-    assert.strictEqual(m[1].toUpperCase(), expected);
-  }
-  assert.strictEqual('no edge info here'.match(/location=([A-Z0-9]+)/i), null);
+test('Tunnel recognises the URL and edge location when a line arrives in two writes', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-split-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, 'fake-cloudflared.sh');
+  fs.writeFileSync(stub, [
+    '#!/bin/sh',
+    'printf "INF https://split-test.try"',
+    'sleep 0.15',
+    'printf "cloudflare.com\\n"',
+    'printf "INF Registered tunnel connection loca"',
+    'sleep 0.15',
+    'printf "tion=lhr connIndex=0\\n"',
+    'sleep 0.15',
+  ].join('\n'));
+  fs.chmodSync(stub, '755');
+
+  const urls = [];
+  const locations = [];
+  await new Promise((resolve) => {
+    startTunnel({
+      localPort: 3000,
+      binPath: stub,
+      onUrl: (url) => urls.push(url),
+      onLocation: (loc) => locations.push(loc),
+      onClose: () => resolve(),
+    });
+  });
+
+  assert.deepStrictEqual(urls, ['https://split-test.trycloudflare.com']);
+  assert.deepStrictEqual(locations, ['LHR']);
+});
+
+test('Tunnel parses a final line that has no trailing newline', async (t) => {
+  if (process.platform === 'win32') { t.skip('Shell script stub test skipped on Windows'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-nonl-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stub = path.join(dir, 'fake-cloudflared.sh');
+  fs.writeFileSync(stub, '#!/bin/sh\nprintf "https://no-newline.trycloudflare.com"\n');
+  fs.chmodSync(stub, '755');
+
+  const urls = [];
+  await new Promise((resolve) => {
+    startTunnel({ localPort: 3000, binPath: stub, onUrl: (url) => urls.push(url), onClose: () => resolve() });
+  });
+  assert.deepStrictEqual(urls, ['https://no-newline.trycloudflare.com']);
 });
 
 test('Tunnel keeps 10-line ring buffer of recent output on premature exit', async (t) => {

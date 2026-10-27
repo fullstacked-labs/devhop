@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
-import { Relay } from '../../src/gateway/relay.js';
-import { startGateway } from '../../src/gateway/client.js';
-import { FRAME, encodeFrame, FrameDecoder } from '../../src/gateway/frames.js';
+import { Relay } from '../src/relay.js';
+import { startGateway } from '../src/client.js';
+import { FRAME, encodeFrame, FrameDecoder } from '../src/frames.js';
 
 const SALT = 'test-salt';
 

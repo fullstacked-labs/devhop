@@ -1,14 +1,14 @@
 // Integration tests for the gateway relay.
 // The mock client speaks the real codec over hand-rolled WS frames,
-// mirroring what src/gateway/client.js does.
+// mirroring what experimental/gateway/src/client.js does.
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
-import { Relay } from '../../src/gateway/relay.js';
-import { FRAME, encodeFrame, FrameDecoder } from '../../src/gateway/frames.js';
+import { Relay } from '../src/relay.js';
+import { FRAME, encodeFrame, FrameDecoder } from '../src/frames.js';
 
 // undici's fetch forbids overriding Host; raw http.request does not.
 // agent:false → Connection: close; no keep-alive sockets left holding the

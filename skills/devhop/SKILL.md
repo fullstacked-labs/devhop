@@ -55,6 +55,8 @@ npx devhop 3000 --http2             # use when the tunnel fails on networks that
    - `NO_DEV_SERVER`: start the dev server, then pass its port.
    - `TUNNEL_START_FAILED` or `TUNNEL_EXITED`: retry once with `--http2`.
    - `INVALID_TARGET`: pass the URL exactly as the dev server printed it.
+   - `INVALID_ARGUMENT`: remove the unknown option or extra target named in the
+     `message`; devhop takes one target and `--json`, `--no-qr` and `--http2`.
 5. When the user is done, stop devhop with SIGINT (Ctrl+C). It shuts down
    cloudflared with it.
 

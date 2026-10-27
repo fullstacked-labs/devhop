@@ -1,7 +1,7 @@
 // Gateway relay. Loopback HTTP server that accepts client WSS upgrades (RFC
 // 6455 server handshake hand-rolled, no deps) and ingress HTTP connections
 // routed by Host, then pumps bytes both ways without parsing them. Each WS
-// binary message is exactly one codec frame (src/gateway/frames.js).
+// binary message is exactly one codec frame (experimental/gateway/src/frames.js).
 //
 // - PING/backoff/idle timers are constructor options so tests run fast.
 // - Backpressure uses one aggregate high-water mark with socket pause/resume.

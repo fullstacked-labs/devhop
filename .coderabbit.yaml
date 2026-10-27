@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  path_filters:
+    - "!REFACTOR.md"
+    - "!experimental/**"
+    - "!package-lock.json"
+  path_instructions:
+    - path: "src/**"
+      instructions: >
+        Node >= 20, ESM, stdlib only (two runtime dependencies). Comments explain
+        why, not what. The --json events and error codes are public API: add
+        fields, don't rename or remove them.
+    - path: "test/**"
+      instructions: >
+        Tests bind port 0 or findFreePort(), never a fixed port, and every
+        regression test should fail on the code it fixes.
