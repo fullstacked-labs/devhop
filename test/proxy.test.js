@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createMasqueradeProxy } from '../src/proxy.js';
-import { startTunnel } from '../src/tunnel.js';
+import { startTunnel, removeOldVersions } from '../src/tunnel.js';
 import { isPortOpen, detectDevPorts, findFreePort, parseTarget, urlHost } from '../src/port.js';
 
 test('Inspector page is served by devhop while app responses stay byte-identical', async (t) => {
@@ -575,6 +575,37 @@ for (const alias of ['::1', '::']) {
     assert.strictEqual(await response.text(), 'over ipv6');
   });
 }
+
+test('Cache cleanup removes older cloudflared versions and keeps the current one', async (t) => {
+  const { CLOUDFLARED_VERSION } = await import('../src/cloudflared.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const version of ['2020.1.1', CLOUDFLARED_VERSION, 'not-a-version']) {
+    fs.mkdirSync(path.join(root, version));
+  }
+  fs.writeFileSync(path.join(root, 'cloudflared'), 'legacy unversioned binary');
+
+  removeOldVersions(root);
+
+  assert.deepStrictEqual(fs.readdirSync(root).sort(), [CLOUDFLARED_VERSION, 'not-a-version'].sort());
+});
+
+test('Cache cleanup does not throw when an old version cannot be deleted', async (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.skip('needs POSIX permissions that apply to the current user');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'devhop-cache-'));
+  t.after(() => {
+    fs.chmodSync(root, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  fs.mkdirSync(path.join(root, '2020.1.1'));
+  fs.chmodSync(root, 0o555); // entries can no longer be removed
+
+  assert.doesNotThrow(() => removeOldVersions(root));
+  assert.ok(fs.existsSync(path.join(root, '2020.1.1')));
+});
 
 test('Tunnel parses Cloudflare Edge location from log output', async (t) => {
   const { startTunnel } = await import('../src/tunnel.js');

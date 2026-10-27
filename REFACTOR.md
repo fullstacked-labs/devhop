@@ -19,7 +19,6 @@ item once its fix lands, or mark it done with a link to the commit.
 | B2 | `src/tunnel.js` SIGKILL fallback never fires | high | reproduced |
 | B7 | `src/cli.js` treats the `--gateway` value as a target | medium | obsolete |
 | B10 | `src/cli.js` free-port race and unhandled `listen` error | low-medium | inspection |
-| B12 | `src/tunnel.js` cache cleanup can fail a good install | low | inspection |
 | B13 | `src/cli.js` ignores unknown flags and extra targets | low | inspection |
 | B15 | `--json` events can be lost on `process.exit` | low | reproduced only with a stalled reader |
 | B16 | demo images are missing from the npm package | low | reproduced |
@@ -121,19 +120,6 @@ listener, so `EADDRINUSE` becomes an uncaught event/stack trace.
 
 **Test:** start the proxy twice; the second must either get a different port
 or a clean error, never an uncaught event.
-
-### B12 — cache cleanup can fail an otherwise successful install
-
-**Where:** `src/tunnel.js:55`, `src/tunnel.js:65-74`
-
-`removeOldVersions` runs inside the download `try`. An `EACCES` or `ENOENT`
-while deleting an old version directory turns a successful rename into
-`Failed to install cloudflared`, even though the new binary is in place.
-
-**Fix:** make cache cleanup best-effort and separate from the download result.
-
-**Test:** stub the cleanup to throw; `ensureBinary` still returns the installed
-path.
 
 ### B13 — unknown flags and extra targets are silently ignored
 
@@ -745,7 +731,6 @@ This is the highest-value change and fixes B7 and B13.
   suite's wall-clock time.
 - Fix `close()` escalation with an `exit` listener and an exit-code check
   (B2).
-- Make cache cleanup best-effort (B12).
 
 ### Phase 4 — split the tests by module
 
@@ -816,7 +801,7 @@ standalone cleanup branch that adds review load without reducing risk.
 12. `docs: use packaged demo assets or absolute URLs` (B16)
 
 Steps 1–6 are small, each has a reproduction, and none need a design decision.
-Step 7 pays for every later PR. B10, B12, and B15 can ride along with the
+Step 7 pays for every later PR. B10 and B15 can ride along with the
 files they touch. Step 2 needs `quit()` to await `close()`, so it lands with
 or after step 7.
 
@@ -884,3 +869,10 @@ Things found while fixing the items above. Newest last.
 - The test server helper in `test/cloudflared.test.js` now calls
   `closeAllConnections()`, otherwise a deliberately stalled socket keeps
   `server.close()` waiting.
+- `removeOldVersions` only runs after a fresh download, and `ensureBinary`
+  hard-codes the GitHub URL, so no test can reach it through `ensureBinary`
+  without network. B12's fix is therefore tested on `removeOldVersions`
+  directly, which is now exported for that reason (the A4 smell). A
+  `downloadCloudflared` seam on `ensureBinary` would remove the need.
+- The B12 permission test skips as root and on Windows, so CI containers that
+  run as root skip it silently.

@@ -63,15 +63,20 @@ export async function ensureBinary(onProgress) {
 
 // Older pins sit next to the current one as <version>/ directories; releases
 // before 0.2 cached an unversioned binary directly in the cache root.
-function removeOldVersions(cacheRoot) {
+//
+// Best-effort: a stale directory we cannot delete must not fail an install that
+// already succeeded.
+export function removeOldVersions(cacheRoot) {
   for (const legacy of ['cloudflared', 'cloudflared.exe']) {
     try { fs.unlinkSync(path.join(cacheRoot, legacy)); } catch (_) {}
   }
-  for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (entry.isDirectory() && /^\d{4}\.\d+\.\d+$/.test(entry.name) && entry.name !== CLOUDFLARED_VERSION) {
-      fs.rmSync(path.join(cacheRoot, entry.name), { recursive: true, force: true });
+  try {
+    for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && /^\d{4}\.\d+\.\d+$/.test(entry.name) && entry.name !== CLOUDFLARED_VERSION) {
+        fs.rmSync(path.join(cacheRoot, entry.name), { recursive: true, force: true });
+      }
     }
-  }
+  } catch (_) {}
 }
 
 // Quick-tunnel creation fails intermittently; one retry fixes most first-run failures.
